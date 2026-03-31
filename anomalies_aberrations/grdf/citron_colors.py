@@ -1,0 +1,6 @@
+orange = '#FF670F'
+pink = '#FC006D'
+blue = '#006CED'
+green = '#2BD67C'
+red = '#FF5D5D'
+black = '#2B3034'
