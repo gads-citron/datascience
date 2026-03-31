@@ -1,0 +1,14 @@
+*.env
+*_draft*
+*.ipynb_checkpoints
+*.pyc
+*out/
+*res/
+*logs/
+*data/
+*model/test/
+.DS_Store
+*pic/
+*useless/
+*__pycache__/
+.idea
