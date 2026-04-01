@@ -38,32 +38,32 @@ def saveParquet(df, folder):
     df.to_parquet('./occupancy_citron/data/'+folder+'/', partition_cols=['year', 'month'])
 
 def serie_typology(df, tol=0.1):
-    score = np.mean((df.shift() - df) < 0)
+    score = np.mean((df.shift() - df) < 0) # combien de fois la valeur décrémente
     if score > tol:
         return 0 # volume
-    else :
+    else:
         return 1 # index
 
-def write_to_db(s_occ, r, y_col, db):
+def write_to_db(s_occ, r, y_col, dataType, db):
     s_occ['device_id'] = r.device_id
     s_occ['sensor_name'] = r.sensor_name
     s_occ['sensor_id'] = r.sensor_id
     s_occ['site_id'] = r.site_id
     s_occ['data_source'] = [['.'.join([p.datasource, y_col])].copy() for _ in range(len(s_occ))]
     s_occ['model_version'] = model_version
+    s_occ['valueType'] = dataType
     s_occ['ingested_at'] = dt.datetime.now()
     db.insert_df(p.dataout, occ)
 #%% liste des équipements et sites
 devices = pd.read_csv('./data/sous_comptage_elec_tertiaire.csv')
 #%% liste des capteurs relevant
 sensors = pd.read_csv('./data/liste_sensor_electric_devices.csv', sep=';')
-# sensors = sensors[sensors.Considere==1]
-sensors = sensors[sensors.Index==1]
+sensors = sensors[sensors.Considere==1] # on vire les capteurs de type gaz et eau
+# sensors = sensors[sensors.Index==1]
 #%%
 df = devices[(devices.meter_type == 'Sous-compteur') \
                  & (devices.Typologie_client == 'Tertiaire')]
 client = db_connect(type='prod')
-# uniquement les capteurs volumétriques (sur le papier)
 sample = client.query_df(f"""
             SELECT distinct device_id, sensor_id, sensor_name, site_id
             FROM {p.datasource}
@@ -75,8 +75,8 @@ sample = client.query_df(f"""
 #%% compute and write to database
 # occupancy = []
 model_version = 'V0'
-y_column = 'eval_prev_hour' # colonne pour données de type index
-# y_column = 'sum_payload_value_hour_curr' # colonne pour des données volumétriques
+# y_column = 'eval_prev_hour' # colonne pour données de type index
+y_column = 'sum_payload_value_hour_curr' # colonne pour des données volumétriques
 x_time = 'payload_expected_time'
 db_stage = db_connect(type='stage')
 run_errors = []
@@ -87,7 +87,7 @@ for i, row in tqdm(sample[:].iterrows()):
         error_dict = {"device":row.device_id, "start":start, 'end':end,
                       "sensor_name":row.sensor_name, "feature_col":y_column}
         df = client.query_df(f"""
-            SELECT device_id, {x_time}, {y_column}
+            SELECT device_id, {x_time}, {y_column}, eval_prev_hour
             FROM {p.datasource}
             WHERE 1=1
             AND {x_time} > '{start}'
@@ -96,12 +96,24 @@ for i, row in tqdm(sample[:].iterrows()):
             AND sensor_id = '{row.sensor_id}'
             ORDER BY {x_time} DESC
             settings max_rows_to_read = 10000000000000;""")
+        dataType = 'volume'
         if df.empty:
             error_dict['error']="no_data"
             run_errors.append(error_dict)
             end -= dt.timedelta(hours=168)
             start -= dt.timedelta(hours=168)
             continue
+
+        if serie_typology(df[y_column]):
+            y_column = 'eval_prev_hour'
+            dataType = 'index'
+            if serie_typology(df[y_column]):
+                error_dict['error'] = "index_serie_on_eval_prev"
+                run_errors.append(error_dict)
+                end -= dt.timedelta(hours=168)
+                start -= dt.timedelta(hours=168)
+                continue
+
         if df[y_column].isna().mean() > 0.1 :
             error_dict['error'] = "too_many_NAN"
             run_errors.append(error_dict)
@@ -115,13 +127,7 @@ for i, row in tqdm(sample[:].iterrows()):
             start -= dt.timedelta(hours=168)
             continue
         if df[y_column].value_counts().shape[0] < 100:
-            error_dict['error']="discrete"
-            run_errors.append(error_dict)
-            end -= dt.timedelta(hours=168)
-            start -= dt.timedelta(hours=168)
-            continue
-        if serie_typology(df[y_column]):
-            error_dict['error'] = "index_serie"
+            error_dict['error']="continuous"
             run_errors.append(error_dict)
             end -= dt.timedelta(hours=168)
             start -= dt.timedelta(hours=168)
@@ -142,7 +148,7 @@ for i, row in tqdm(sample[:].iterrows()):
             occ = s_extract.compute(scaled, idx)
             occ.reset_index(inplace=True)
             occ.rename({x_time:'payload_timestamp'}, inplace=True, axis=1)
-            write_to_db(occ, row, y_column,db_stage)
+            write_to_db(occ, row, y_column, dataType, db_stage)
             # occupancy.append(occ)
             end -= dt.timedelta(hours=168)
             start -= dt.timedelta(hours=168)
