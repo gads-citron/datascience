@@ -13,7 +13,6 @@ from sklearn.preprocessing import MinMaxScaler
 # variables
 sous_comptage = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
 history = "toDateTime('2025-01-01 01:00:00')"
-
 # %% clickhouse env load
 load_dotenv()
 host = urllib.parse.quote_plus(os.environ.get("clk_prod"))
@@ -22,7 +21,8 @@ password = urllib.parse.quote_plus(os.environ.get('clk_prod_pass'))
 client = clickhouse_connect.get_client(host=host, username=username,
                                        port=443, password=password)
 #%%
-def detect_outliers_iqr(data, k = 10):
+def detect_outliers_iqr(data, k = 100):
+    data.dropna(inplace=True)
     q25, q75 = np.percentile(data, [25, 75])
     iqr = q75 - q25
     if iqr <1:
@@ -47,9 +47,10 @@ def check_anomalies(s, col):
     neg = 0
     if not s[s[col] <0].empty:
         neg = 1
+    miss = s[col].isna().mean()
     anom = detect_outliers_iqr(s[col])[0].sum()
-    amp = s[col].value_counts().shape[0]
-    return neg, anom, amp
+    card = s[col].value_counts().shape[0]
+    return neg, anom, card, miss
 
 def serie_typology(df, tol=0.1):
     score = np.mean((df.shift() - df) < 0)
@@ -62,10 +63,9 @@ sensors = pd.read_csv('./data/liste_sensor_electric_devices.csv', sep=';')
 smart_imp = sensors[sensors.smart_impulse==1].sensor_id.to_list()
 # sensors_idx = sensors[(sensors.Index==1) & (sensors.enedis == 0)]
 sensors_idx = sensors[(sensors.enedis == 0)]
-
 #%% Anomalies où il y a changement d'index
 start = "toDateTime('2025-01-01 01:00:00')"
-end = "toDateTime('2025-06-01 01:00:00')"
+end = "toDateTime('2025-12-31 01:00:00')"
 
 list_anom = client.query_df(f"""select distinct device_name, device_id, payload_expected_time, sensor_name,
                 customer_account_name, eval_prev_hour
@@ -80,8 +80,6 @@ list_anom = client.query_df(f"""select distinct device_name, device_id, payload_
     and device_type like '%lectr%'
     limit 2000;""")
 #%%
-start = "toDateTime('2025-01-01 01:00:00')"
-
 check_column = 'eval_prev_hour'
 volume = 'sum_payload_value_hour_curr'
 anomaly = []
@@ -103,11 +101,13 @@ for i, row in tqdm(list_anom[:].iterrows()):
     if not serie_typology(df[volume]):
         continue
     if df[check_column].dropna().empty :
+        r_dict['missing'] = df.shape[0]
         continue
-    neg, anom, discrete = check_anomalies(df, check_column)
+    neg, anom, cardinality, missing = check_anomalies(df, check_column)
     r_dict['negative'] = neg
     r_dict['outlier'] = anom
-    r_dict['amplitude'] = discrete
+    r_dict['cardinality'] = cardinality
+    r_dict['missing'] = missing
     r_dict['device_id'] = row.device_id
     r_dict['client'] = df.customer_account_name.values[0]
     anomaly.append(r_dict)
