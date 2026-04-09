@@ -9,7 +9,8 @@ from sklearn.preprocessing import MinMaxScaler
 
 #%%# variables
 sous_comptage = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
-history = "toDateTime('2025-01-01 01:00:00')"
+start = "2025-06-01 00:00:00"
+end = "2025-12-31 00:00:00"
 # %% clickhouse env load
 load_dotenv()
 host = urllib.parse.quote_plus(os.environ.get("clk_prod"))
@@ -67,43 +68,38 @@ def anom_loop_device(sens, dev, c, m, s):
     except:
         r_dict['error'] = "run_error"
     return r_dict
-#%% liste des capteurs electricité
-sensors = pd.read_csv('./data/liste_sensor_electric_devices.csv', sep=';')
-sensors_idx = sensors[(sensors.enedis == 0) & (sensors.smart_impulse==0) & (sensors.Considere==1)]
 #%% liste des clients
-start = "2025-01-01 00:00:00"
-# start = "2025-06-30 23:59:00"
-end = "2025-06-30 00:00:00"
-# list_anom = pd.read_csv('./data/spike_list_clk_query.csv')
 customers = client.query_df(f"""
         SELECT distinct customer_account_name
         FROM {sous_comptage}
         WHERE 1=1
          AND payload_expected_time between '{start}' and '{end}'
          AND eval_prev_hour IS NOT NULL
-         AND sensor_id IN {sensors_idx.sensor_id.to_list()}
+         AND device_type like '%lectr%'
+            AND sensor_name not like '%(Cons)%'
+            AND sensor_name not like '%gaz%'
+            AND sensor_name not like '%\''eau%'
          LIMIT 100""")
 list_cust = customers.customer_account_name.to_list()
 #%%
-check_column = 'eval_prev_hour'
-# check_column = 'sum_payload_value_hour_curr'
-# custom = 'ISAE - SUPAERO'
-custom = 'ENAC'
 custom_anom = []
 for custom in list_cust[:]:
     equip_list = client.query_df(f"""
             SELECT distinct device_id, device_name, sensor_id, sensor_name, month
             FROM {sous_comptage}
             WHERE 1=1
-                AND eval_prev_hour IS NOT NULL
+                AND sum_payload_value_hour_curr IS NOT NULL
                 AND customer_account_name = '{custom.replace("'", "''")}'
-                AND sensor_id IN {sensors_idx.sensor_id.to_list()}
+                AND device_type like '%lectr%'
+                AND sensor_name not like '%(Cons)%'
+                AND sensor_name not like '%gaz%'
+                AND sensor_name not like '%\''eau%'
                 AND payload_expected_time between '{start}' and '{end}'""")
     anomaly = []
     print(custom)
     for row in tqdm(equip_list[:100].itertuples(index=False)):
         smp = client.query_df(f"""
-                    SELECT device_id, payload_expected_time, entity, eval_prev_hour
+                    SELECT device_id, payload_expected_time, entity, eval_prev_hour, sum_payload_value_hour_curr
                     FROM {sous_comptage}
                     WHERE 1=1
                         AND payload_expected_time between '{start}' and '{end}'
@@ -116,9 +112,15 @@ for custom in list_cust[:]:
         if smp.empty:
             continue
         else:
+            incremental = serie_typology(smp['sum_payload_value_hour_curr'])
+            if incremental :
+                check_column = 'eval_prev_hour'
+            else:
+                check_column = 'sum_payload_value_hour_curr'
             smp = smp[smp.entity == smp.entity.values[0]]
-            records = anom_loop_device(row.sensor_name, row.device_name, custom, row.month, smp[check_column])
-            anomaly.append(records)
+            record = anom_loop_device(row.sensor_name, row.device_name, custom, row.month, smp[check_column])
+            record['incremental_data'] = incremental
+            anomaly.append(record)
     anomaly = pd.DataFrame(anomaly)
     custom_anom.append(anomaly)
 custom_anom = pd.concat(custom_anom)

@@ -28,6 +28,13 @@ def plot_conso(df, dev, conso):
     fig.update_xaxes(ticks='outside', dtick=str(24*60*60*1000),
                      tickangle=-45, tickformat='%a-%b-%e')
     fig.show()
+
+def serie_typology(df, tol=0.1):
+    score = np.mean((df.shift() - df) < 0)  # combien de fois la valeur décrémente
+    if score > tol:
+        return 0  # volume
+    else:
+        return 1  # index
 #%% liste des anomalies
 start = "2025-01-01 00:00:00"
 # start = "2025-06-30 23:59:00"
@@ -38,7 +45,7 @@ df_analyse = []
 cpt = 0
 for row in tqdm(anom[:10].itertuples(index=False)):
     smp = client.query_df(f"""
-                SELECT device_id, payload_expected_time, entity, eval_prev_hour
+                SELECT device_id, payload_expected_time, entity, eval_prev_hour, sum_payload_value_hour_curr
                 FROM {sous_comptage}
                 WHERE 1=1
                     AND payload_expected_time between '{start}' and '{end}'
@@ -47,11 +54,15 @@ for row in tqdm(anom[:10].itertuples(index=False)):
                     AND device_name = '{row.device_name.replace("'", "''")}'
                 ORDER BY payload_expected_time
                 LIMIT 100000""")
-    smp['eval_prev_hm1'] = smp.eval_prev_hour.shift(1)
-    smp['val_diff'] = smp.eval_prev_hour.median()/smp.eval_prev_hour
+    if row.incremental_data:
+        y_col = 'eval_prev_hour'
+    else :
+        y_col = 'sum_payload_value_hour_curr'
+    smp[y_col] = smp[y_col].shift(1)
+    smp['val_diff'] = smp[y_col].median()/smp[y_col]
     smp['smp_idx'] = cpt
     cpt += 1
-    plot_conso(smp.dropna(), row.device_name, 'eval_prev_hour')
+    plot_conso(smp[~smp[y_col].isna()], row.device_name, y_col)
     df_analyse.append(smp)
 df_analyse = pd.concat(df_analyse)
 df_analyse.dropna(inplace=True)
