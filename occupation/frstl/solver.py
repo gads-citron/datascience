@@ -6,7 +6,8 @@ Created on Fri Dec 20 10:41:19 2024
 """
 
 from cvxopt import matrix, spdiag, mul, div, solvers, lapack
-
+solvers.options['maxiters'] = 5
+solvers.options['show_progress'] = False
 def l1(P, q):
     m, n = P.size
     c = matrix(n*[0.0] + m*[1.0])

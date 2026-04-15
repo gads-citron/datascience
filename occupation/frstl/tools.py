@@ -9,7 +9,8 @@ import math
 import numpy as np
 from scipy.linalg import toeplitz
 from cvxopt import matrix, spdiag, mul, div, solvers, lapack
-
+solvers.options['maxiters'] = 5
+solvers.options['show_progress'] = False
 def l1(P, q):
     m, n = P.size
     c = matrix(n*[0.0] + m*[1.0])
