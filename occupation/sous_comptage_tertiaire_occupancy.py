@@ -36,7 +36,7 @@ def get_clickhouse_credentials(db='stage'):
     secret = json.loads(get_secret_value_response['SecretString'])
     return secret
 
-def db_connect(type='prod', envir):
+def db_connect(type='prod', envir='local'):
     if envir == 'local':
         load_dotenv()
         username = urllib.parse.quote_plus(os.environ.get("USER_NAME"))
