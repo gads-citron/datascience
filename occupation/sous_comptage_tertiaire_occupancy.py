@@ -76,7 +76,7 @@ def write_to_db(s_occ, r, y_col, datat, db):
     s_occ['model_version'] = p.model_version
     s_occ['valueType'] = datat
     s_occ['ingested_at'] = dt.datetime.now()
-    db.insert_df(p.dataout, occ)
+    db.insert_df(p.dataout, s_occ)
 
 def preprocess_elec(s):
     """
@@ -148,10 +148,10 @@ def check_problems(s, errors, y_col):
     if s[y_col].astype(float).sum() == 0:
         errors['error'] = "zero_values"
         flag_return = 1
-    if df[y_col].value_counts().shape[0] < 100:
+    if s[y_col].value_counts().shape[0] < 100:
         errors['error'] = "continuous"
         flag_return = 1
-    if df.shape[0] < 168 * 3:
+    if s.shape[0] < 168 * 3:
         errors['error'] = "history_not_enough"
         flag_return = 1
     return errors, flag_return, y_col, datat
@@ -225,8 +225,8 @@ for i, row in tqdm(to_process[:].iterrows()):
             occ.rename({x_time:'payload_timestamp'}, inplace=True, axis=1)
             write_to_db(occ, row, y_column, datatype, stage_client) # push data through dataset occupancy in stage db
             run_errors.append(error_dict)
-        except:
-            error_dict['error']="frstl_pb"
+        except Exception as e:
+            error_dict['error'] = f"frstl_pb: {e}"
             run_errors.append(error_dict)
             continue
 run_errors = pd.DataFrame(run_errors)
