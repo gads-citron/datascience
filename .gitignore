@@ -12,3 +12,5 @@
 *useless/
 *__pycache__/
 .idea
+.venv/
+CLAUDE.md

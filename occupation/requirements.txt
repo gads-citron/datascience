@@ -1,0 +1,13 @@
+boto3
+clickhouse-connect
+cvxopt
+numpy>=1.26,<3
+pandas>=2.2,<3
+plotly
+python-dotenv
+pyarrow
+scikit-learn
+scipy
+statsmodels
+tqdm
+tslearn
