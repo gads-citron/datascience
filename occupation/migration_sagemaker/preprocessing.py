@@ -1,5 +1,5 @@
 import sys, time, logging
-sys.path.insert(0, '/opt/ml/dependencies/')
+sys.path.insert(0, '/opt/ml/processing/dependencies/')
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
@@ -46,8 +46,8 @@ def preprocess_water(s, y_col):
     return s[y_col]
 
 #%%
-input_path = "/opt/ml/input"
-output_path = "/opt/ml/output"
+input_path = "/opt/ml/processing/input"
+output_path = "/opt/ml/processing/output"
 x_time = 'payload_expected_time'
 y_column = 'raw_value'
 

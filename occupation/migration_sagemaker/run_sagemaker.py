@@ -45,11 +45,11 @@ for file_key in files:
         inputs=[
             ProcessingInput(
                 source=f"s3://{bucket}/{file_key}",
-                destination="/opt/ml/input"
+                destination="/opt/ml/processing/input"
             ),
             ProcessingInput(
                 source=f"s3://{bucket}/{deps_prefix}",
-                destination="/opt/ml/dependencies"
+                destination="/opt/ml/processing/dependencies"
             ),
         ],
         outputs=[
