@@ -1,4 +1,4 @@
-import sys, os, time, logging
+import sys, time, logging
 sys.path.insert(0, '/opt/ml/processing/dependencies/')
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler
@@ -47,7 +47,7 @@ def preprocess_water(s, y_col):
 
 #%%
 input_path = "/opt/ml/processing/input"
-output_path = "/opt/ml/processing/output"
+output_path = "/opt/ml/output"
 x_time = 'payload_expected_time'
 y_column = 'raw_value'
 
@@ -68,7 +68,6 @@ smp = preprocess_elec(df)
 scaled = scaler.fit_transform(pd.DataFrame(smp)).flatten()
 idx = smp.index
 s_extract = Seasonality()
-os.makedirs(output_path, exist_ok=True)
 try : 
     occ = s_extract.compute(scaled, idx)
     occ.reset_index(inplace=True)
