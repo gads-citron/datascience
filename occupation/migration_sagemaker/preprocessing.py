@@ -1,11 +1,10 @@
-import sys
-sys.path.insert(0, '/opt/ml/processing/input/dependencies/')
-import time, logging
+import sys, os, time, logging
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 import numpy as np
 from Seasonality import Seasonality
+sys.path.insert(0, '/opt/ml/processing/input/dependencies/')
 
 def preprocess_elec(s):
     """
@@ -68,6 +67,7 @@ smp = preprocess_elec(df)
 scaled = scaler.fit_transform(pd.DataFrame(smp)).flatten()
 idx = smp.index
 s_extract = Seasonality()
+os.makedirs(output_path, exist_ok=True)
 try : 
     occ = s_extract.compute(scaled, idx)
     occ.reset_index(inplace=True)
