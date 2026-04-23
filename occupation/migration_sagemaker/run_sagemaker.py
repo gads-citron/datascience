@@ -54,7 +54,7 @@ for file_key in files:
         ],
         outputs=[
             ProcessingOutput(
-                source="/opt/ml/output",
+                source="/opt/ml/processing/output",
                 destination=f"s3://{bucket}/processed/{partition_path}/"
             )
         ],
