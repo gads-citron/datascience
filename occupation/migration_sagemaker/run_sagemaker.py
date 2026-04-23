@@ -3,6 +3,7 @@ from sagemaker.processing import ScriptProcessor, ProcessingInput, ProcessingOut
 from sagemaker import get_execution_role
 import os
 import datetime as dt
+from pathlib import Path
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 preprocessing_script = os.path.join(script_dir, "preprocessing.py")
@@ -38,6 +39,7 @@ processor = ScriptProcessor(
 
 for file_key in files:
     timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    partition_path = str(Path(file_key[len(prefix):]).parent)
     processor.run(
         code=preprocessing_script,
         inputs=[
@@ -53,7 +55,7 @@ for file_key in files:
         outputs=[
             ProcessingOutput(
                 source="/opt/ml/processing/output",
-                destination=f"s3://{bucket}/processed/{file_key}"
+                destination=f"s3://{bucket}/processed/{partition_path}/"
             )
         ],
         job_name=f"preprocess-{file_key.split('/')[-1].replace('.parquet','').replace('_', '-')}-{timestamp}"

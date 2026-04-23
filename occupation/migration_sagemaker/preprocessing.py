@@ -57,7 +57,7 @@ logging.info("Démarrage du traitement")
 
 # Lire parquet
 files = list(Path(input_path).glob("*.parquet"))
-
+source_name = files[0].stem 
 df = pd.concat([pd.read_parquet(f) for f in files])
 
 # Exemple preprocessing
