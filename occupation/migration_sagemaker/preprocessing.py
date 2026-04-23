@@ -1,10 +1,11 @@
 import sys, os, time, logging
+sys.path.insert(0, '/opt/ml/processing/dependencies/')
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 import numpy as np
 from Seasonality import Seasonality
-sys.path.insert(0, '/opt/ml/processing/input/dependencies/')
+
 
 def preprocess_elec(s):
     """

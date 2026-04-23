@@ -49,7 +49,7 @@ for file_key in files:
             ),
             ProcessingInput(
                 source=f"s3://{bucket}/{deps_prefix}",
-                destination="/opt/ml/processing/input/dependencies"
+                destination="/opt/ml/processing/dependencies"
             ),
         ],
         outputs=[
