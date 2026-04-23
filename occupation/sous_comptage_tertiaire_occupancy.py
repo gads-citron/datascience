@@ -189,14 +189,14 @@ endtpoint = pd.date_range(start="2026-01-01 00:00:00", end="2026-04-01 00:00:00"
 df_dates = pd.DataFrame({"end": endtpoint})
 to_process = sample.merge(df_dates, how="cross")
 run_errors = []
-for i, row in tqdm(to_process[:].iterrows()):
+for i, row in tqdm(to_process[:1].iterrows()):
     end = row.end
     start = end - dt.timedelta(hours=3*168)
     y_column = 'sum_payload_value_hour_curr'
     error_dict = {"device":row.device_id, "start":start, 'end':end,
                   "sensor_name":row.sensor_name}
     df = prod_client.query_df(f"""
-        SELECT device_id, {x_time}, sum_payload_value_hour_curr, eval_prev_hour
+        SELECT device_id, {x_time}, sum_payload_value_hour_curr, eval_prev_hour, sensor_id
         FROM {p.datasource}
         WHERE 1=1
         AND {x_time} between '{start}' and '{end}'
@@ -213,7 +213,6 @@ for i, row in tqdm(to_process[:].iterrows()):
         try:
             scaler = MinMaxScaler(feature_range=(0, 1))
             df = df.resample('1h', on=x_time)[y_column].sum().astype(float)
-            df[df < 0] = 0
             # smp = preprocess(df, y_column)
             smp = preprocess_elec(df)
             scaled = scaler.fit_transform(pd.DataFrame(smp)).flatten()
