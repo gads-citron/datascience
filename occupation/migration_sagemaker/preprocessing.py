@@ -5,6 +5,7 @@ from sklearn.preprocessing import MinMaxScaler
 import pandas as pd
 import numpy as np
 from Seasonality import Seasonality
+from collections import defaultdict
 
 
 def preprocess_elec(s):
@@ -56,23 +57,27 @@ t0 = time.time()
 logging.info("Démarrage du traitement")
 
 # Lire parquet
-files = list(Path(input_path).glob("*.parquet"))
-df = pd.concat([pd.read_parquet(f) for f in files])
-
-# Exemple preprocessing
 scaler = MinMaxScaler(feature_range=(0, 1))
-df = df.resample('1h', on=x_time)[y_column].sum().astype(float)
-# smp = preprocess(df, y_column)
-smp = preprocess_elec(df)
-scaled = scaler.fit_transform(pd.DataFrame(smp)).flatten()
-idx = smp.index
-s_extract = Seasonality()
-try : 
-    occ = s_extract.compute(scaled, idx)
-    occ.reset_index(inplace=True)
-    occ.rename({x_time:'payload_timestamp'}, inplace=True, axis=1)
-    occ.to_parquet(f"{output_path}/processed.parquet", index=False)
-except Exception as e:
-    logging.error(f"frstl_pb: {e}")
+all_files = list(Path(input_path).rglob("*.parquet"))
+for f in all_files:
+    relative = f.relative_to(input_path)  # capteur=x/file_name.parquet
+    out_file = Path(output_path) / relative
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    df = pd.read_parquet(f)
+    df = df.resample('1h', on=x_time)[y_column].sum().astype(float)
+    # smp = preprocess(df, y_column)
+    smp = preprocess_elec(df)
+    scaled = scaler.fit_transform(pd.DataFrame(smp)).flatten()
+    idx = smp.index
+    s_extract = Seasonality()
+    try : 
+        occ = s_extract.compute(scaled, idx)
+        occ.reset_index(inplace=True)
+        occ.rename({x_time:'payload_timestamp'}, inplace=True, axis=1)
+        occ.to_parquet(out_file, index=False)
+        logging.info(f"[{relative}] : done")
+    except Exception as e:
+        logging.error(f"frstl_pb [{relative}]: {e}")
 # Sauvegarde
-logging.info(f"Terminé en {time.time() - t0:.1f}s")
+logging.info(f"Job terminé en {time.time() - t0:.1f}s")
