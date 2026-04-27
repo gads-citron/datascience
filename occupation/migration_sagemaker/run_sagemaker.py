@@ -55,7 +55,7 @@ for file_key in files:
         outputs=[
             ProcessingOutput(
                 source="/opt/ml/processing/output",
-                destination=f"s3://{bucket}/processed/{partition_path}/"
+                destination=f"s3://{bucket}/data/processed/{partition_path}/"
             )
         ],
         job_name=f"preprocess-{file_key.split('/')[-1].replace('.parquet','').replace('_', '-')}-{timestamp}"

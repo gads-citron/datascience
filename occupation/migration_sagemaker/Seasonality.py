@@ -15,12 +15,11 @@ class Seasonality:
         self.denoise_ds = [4.0, 1.0]
         self.season_ds = [5.0, 1.0]
         self.K = 3
-        self.H = 2
-
+    
     def compute(self, smp, idx):
         raw, t, s, r = fast_robustSTL(
             smp, self.season_len, self.trend_regs, self.season_regs,
-            self.alpha, self.z, self.denoise_ds, self.season_ds, self.K, self.H,
+            self.alpha, self.z, self.denoise_ds, self.season_ds, self.K
         )
         return self._postprocess(s, t, idx)
 
@@ -47,5 +46,6 @@ class Seasonality:
         ]
 
         df = pd.DataFrame(adjusted, columns=["occupancy_value"], index=idx)
-        df = df.shift(int(self.H)).fillna(0)
+        df = df.ffill()
+        # df = df.shift(int(self.H)).fillna(0)
         return df.iloc[-7 * 24:]
