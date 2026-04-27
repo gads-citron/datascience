@@ -39,10 +39,9 @@ processor = ScriptProcessor(
 )
 
 for dev_prefix in sorted(dev_prefixes):
-    timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    timestamp = dt.datetime.now().strftime("%H%M%S")
     device_path = dev_prefix[len(prefix):]  # site=X/equip=Y/
     parts = device_path.strip("/").split("/")  # ["site=x", "device_id=y"]
-    site_id = parts[0].split("=")[-1]
     device_id = parts[1].split("=")[-1]
 
     processor.run(
@@ -63,6 +62,8 @@ for dev_prefix in sorted(dev_prefixes):
                 destination=f"s3://{bucket}/data/processed/{device_path.rstrip('/')}/"
             )
         ],
-        job_name = f"site{site_id}-equip{device_id}-{timestamp}",
+        job_name = f"dev{device_id}-{timestamp}",
         wait=False
     )
+
+
