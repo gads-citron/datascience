@@ -37,7 +37,7 @@ class Seasonality:
         Returns:
             DataFrame with column 'occupancy_value', index=timestamp, last 7*24 rows
         """
-        trend_deviation = pd.Series(t - np.median(t)).shift(-int(self.H)).fillna(0).values
+        trend_deviation = pd.Series(t - np.median(t)).fillna(0).values
         fix = np.minimum(trend_deviation, 0)
 
         adjusted = [
