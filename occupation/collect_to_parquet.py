@@ -6,6 +6,8 @@ import clickhouse_connect
 from dotenv import load_dotenv
 import urllib
 import os
+from tqdm import tqdm
+import param as p
 
 #%% collect parameters
 start = "2026-01-01 00:00:00"
@@ -108,7 +110,7 @@ def db_connect(type='prod'):
 prod_client = db_connect(type='prod')
 #%% devices from which collect is to be done:
 devices_list = prod_client.query_df(f"""
-    SELECT distinct device_id, sensor_id
+    SELECT distinct site_id, device_id, sensor_id
     FROM {p.datasource}
     WHERE 1=1
     AND {x_time} between '{start}' and '{end}'
@@ -116,9 +118,9 @@ devices_list = prod_client.query_df(f"""
     settings max_rows_to_read = 10000000000000;""")
 
 process_res = []
-for i, row in devices_list.iterrows():
-    error_dict = {"device":device, "start":start, 'end':end,
-                    "sensor_name":sensor}
+for i, row in tqdm(devices_list.iterrows()):
+    error_dict = {"device":row.device_id, "start":start, 'end':end,
+                    "sensor_name":row.sensor_id}
     df = prod_client.query_df(f"""
         SELECT site_id, device_id, {x_time}, sum_payload_value_hour_curr, eval_prev_hour, sensor_id, entity
         FROM {p.datasource}
@@ -134,5 +136,5 @@ for i, row in devices_list.iterrows():
     error_dict, flag, y_column, datatype = check_problems(df, error_dict, y_column)
     if not flag :
         export_to_parquet(df, y_column, start, end,
-                                site_id, device, sensor, output_dir)
+                                row.site_id, row.device_id, row.sensor_id, output_dir)
     process_res.append(error_dict)
