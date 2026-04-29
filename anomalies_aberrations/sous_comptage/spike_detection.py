@@ -5,6 +5,7 @@ from tqdm import tqdm
 sous_comptage = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
 start = "2025-01-01 00:00:00"
 end = "2025-06-31 00:00:00"
+
 client = ClickHouseClient()
 
 #%% liste des clients
