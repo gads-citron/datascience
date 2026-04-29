@@ -6,6 +6,7 @@ import clickhouse_connect
 from dotenv import load_dotenv
 import urllib
 import os
+import boto3
 from tqdm import tqdm
 import param as p
 
@@ -14,6 +15,12 @@ start = "2026-01-01 00:00:00"
 end = "2026-06-30 23:59:59"
 x_time = 'payload_expected_time'
 output_dir = './data_collect/sample_s3/'
+
+#%% S3 destination (aligné sur run_sagemaker.py)
+S3_BUCKET = os.environ.get("S3_BUCKET", "gads-citron-sagemaker-custom-stage")
+S3_PREFIX = os.environ.get("S3_PREFIX", "data/power_clk_collect/")
+UPLOAD_TO_S3 = os.environ.get("UPLOAD_TO_S3", "1") == "1"
+s3_client = boto3.client("s3") if UPLOAD_TO_S3 else None
 
 #%% liste des sites IQ (ayant eau + elec)
 candidates = pd.read_csv('./data_collect/list_site_eau_and_elec_IQ.csv')
@@ -65,6 +72,20 @@ def check_problems(s, errors, y_col):
         flag_return = 1
     return errors, flag_return, y_col, datat
 
+def upload_to_s3(local_path, site_id, device_id, sensor_id, file_name):
+    """Upload un parquet local vers s3://{S3_BUCKET}/{S3_PREFIX}site_id=.../device_id=.../sensor_id=.../."""
+    if not UPLOAD_TO_S3:
+        return
+    key = (
+        f"{S3_PREFIX}"
+        f"site_id={site_id}/"
+        f"device_id={device_id}/"
+        f"sensor_id={sensor_id}/"
+        f"{file_name}"
+    )
+    s3_client.upload_file(str(local_path), S3_BUCKET, key)
+
+
 def export_to_parquet(df, y_col, start_date, end_date,
                             site_id, device_id, sensor_id, output_dir):
     date_col = 'payload_expected_time'
@@ -94,6 +115,7 @@ def export_to_parquet(df, y_col, start_date, end_date,
     df['raw_value'] = df[y_col]
     cols = ['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'raw_value']
     df[cols].to_parquet(file_path, index=False)
+    upload_to_s3(file_path, site_id, device_id, sensor_id, file_name)
 
 def db_connect(type='prod'):    
     load_dotenv()
