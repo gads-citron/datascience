@@ -1,14 +1,27 @@
 import pandas as pd
 from pathlib import Path
 import datetime as dt
+import numpy as np
+import clickhouse_connect
+from dotenv import load_dotenv
+import urllib
+import os
 
-device = "69cd33080630341bd0015c99"
-sensor = "662bc1c93f0afb78ad05983d"
-site_id = "69cd2f4e0630341bd00149b4"
+#%% collect parameters
 start = "2026-01-01 00:00:00"
 end = "2026-06-30 23:59:59"
 x_time = 'payload_expected_time'
 output_dir = './data_collect/sample_s3/'
+
+#%% liste des sites IQ (ayant eau + elec)
+candidates = pd.read_csv('./data_collect/list_site_eau_and_elec_IQ.csv')
+
+def serie_typology(df, tol=0.1):
+    score = np.mean((df.shift() - df) < 0) # combien de fois la valeur décrémente
+    if score > tol:
+        return 0 # volume
+    else:
+        return 1 # index
 
 def check_problems(s, errors, y_col):
     """
@@ -50,7 +63,7 @@ def check_problems(s, errors, y_col):
         flag_return = 1
     return errors, flag_return, y_col, datat
 
-def export_sliding_parquets(df, y_col, start_date, end_date,
+def export_to_parquet(df, y_col, start_date, end_date,
                             site_id, device_id, sensor_id, output_dir):
     date_col = 'payload_expected_time'
     if df[date_col].dt.tz is not None:
@@ -60,47 +73,66 @@ def export_sliding_parquets(df, y_col, start_date, end_date,
     output_path.mkdir(parents=True, exist_ok=True)
     start = pd.to_datetime(start_date)
     end_date = pd.to_datetime(end_date)
-    while start <= end_date:
-        end = start + pd.Timedelta(weeks=3)
-        window_df = df[(df[date_col] >= start) & (df[date_col] < end)]
-        partition_dir = (
-                output_path /
-                f"site_id={site_id}" /
-                f"device_id={device_id}" /
-                f"sensor_id={sensor_id}"
-        )
-        partition_dir.mkdir(parents=True, exist_ok=True)
+    partition_dir = (
+            output_path /
+            f"site_id={site_id}" /
+            f"device_id={device_id}" /
+            f"sensor_id={sensor_id}"
+    )
+    partition_dir.mkdir(parents=True, exist_ok=True)
 
-        file_name = (
-            f"data_{start.strftime('%Y%m%d')}_"
-            f"{end.strftime('%Y%m%d')}.parquet"
-        )
+    file_name = (
+        f"data_{start.strftime('%Y')}.parquet"
+    )
 
-        file_path = partition_dir / file_name
-        window_df = window_df.copy()
-        window_df['raw_value'] = window_df[y_col]
-        window_df['site_id'] = site_id
-        window_df['raw_value'] = window_df[y_col]
-        cols = ['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'raw_value']
-        window_df[cols].to_parquet(file_path, index=False)
+    file_path = partition_dir / file_name
+    df = df.copy()
+    df['raw_value'] = df[y_col]
+    df['site_id'] = site_id
+    df['raw_value'] = df[y_col]
+    cols = ['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'raw_value']
+    df[cols].to_parquet(file_path, index=False)
 
-        # Décalage de 1 semaine
-        start += pd.Timedelta(weeks=1)
+def db_connect(type='prod'):    
+    load_dotenv()
+    username = urllib.parse.quote_plus(os.environ.get("USER_NAME"))
+    if type=='prod':
+        host = urllib.parse.quote_plus(os.environ.get("clk_prod"))
+        password = urllib.parse.quote_plus(os.environ.get('clk_prod_pass'))
+    elif type == 'stage':
+        host = urllib.parse.quote_plus(os.environ.get("clk_stg"))
+        password = urllib.parse.quote_plus(os.environ.get('clk_stg_pass'))
+    conn = clickhouse_connect.get_client(host=host, username=username, port=443, password=password)
+    return conn
 
-
-df = prod_client.query_df(f"""
-    SELECT site_id, device_id, {x_time}, sum_payload_value_hour_curr, eval_prev_hour, sensor_id
+prod_client = db_connect(type='prod')
+#%% devices from which collect is to be done:
+devices_list = prod_client.query_df(f"""
+    SELECT distinct device_id, sensor_id
     FROM {p.datasource}
     WHERE 1=1
     AND {x_time} between '{start}' and '{end}'
-    AND device_id = '{device}'
-    AND sensor_id = '{sensor}'
-    ORDER BY {x_time} DESC
+    AND site_id IN {candidates.site_id.drop_duplicates().to_list()}
     settings max_rows_to_read = 10000000000000;""")
 
-error_dict, flag, y_column, datatype = check_problems(df, error_dict, y_column)
-if flag:
-    print(f"""poor quality data... {error_dict['error']}""")
-else:
-    export_sliding_parquets(df, y_column, start, end,
-                            site_id, device, sensor, output_dir)
+process_res = []
+for i, row in devices_list.iterrows():
+    error_dict = {"device":device, "start":start, 'end':end,
+                    "sensor_name":sensor}
+    df = prod_client.query_df(f"""
+        SELECT site_id, device_id, {x_time}, sum_payload_value_hour_curr, eval_prev_hour, sensor_id, entity
+        FROM {p.datasource}
+        WHERE 1=1
+        AND {x_time} between '{start}' and '{end}'
+        AND device_id = '{row.device_id}'
+        AND sensor_id = '{row.sensor_id}'
+        ORDER BY {x_time} DESC
+        settings max_rows_to_read = 10000000000000;""")
+    uniq_ent = df.entity.value_counts().index[0] # filter to remove duplicatas from multiple entities
+    df = df[df.entity==uniq_ent]
+    y_column = 'sum_payload_value_hour_curr'
+    error_dict, flag, y_column, datatype = check_problems(df, error_dict, y_column)
+    if not flag :
+        export_to_parquet(df, y_column, start, end,
+                                site_id, device, sensor, output_dir)
+    process_res.append(error_dict)
