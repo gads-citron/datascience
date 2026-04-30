@@ -1,3 +1,6 @@
+# import subprocess, sys
+# subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"])
+
 import pandas as pd
 from pathlib import Path
 import datetime as dt
@@ -7,6 +10,7 @@ from dotenv import load_dotenv
 import urllib
 import os
 import boto3
+import logging
 from tqdm import tqdm
 import param as p
 
@@ -139,8 +143,12 @@ devices_list = prod_client.query_df(f"""
     AND site_id IN {candidates.site_id.drop_duplicates().to_list()}
     settings max_rows_to_read = 10000000000000;""")
 
-process_res = []
-for i, row in tqdm(devices_list.iterrows()):
+log_path = Path(output_dir) / 'process_log.log'
+log_path.parent.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(filename=log_path, level=logging.INFO, format='%(asctime)s %(message)s')
+logger = logging.getLogger(__name__)
+for i, row in tqdm(devices_list[:5].iterrows()):
+    break
     error_dict = {"device":row.device_id, "start":start, 'end':end,
                     "sensor_name":row.sensor_id}
     df = prod_client.query_df(f"""
@@ -159,4 +167,4 @@ for i, row in tqdm(devices_list.iterrows()):
     if not flag :
         export_to_parquet(df, y_column, start, end,
                                 row.site_id, row.device_id, row.sensor_id, output_dir)
-    process_res.append(error_dict)
+    logger.info(json.dumps(error_dict))
