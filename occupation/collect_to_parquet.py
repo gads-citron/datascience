@@ -9,14 +9,14 @@ import clickhouse_connect
 from dotenv import load_dotenv
 import urllib
 import os
+import json
 import boto3
 import logging
 from tqdm import tqdm
 import param as p
-import json
 
 #%% collect parameters
-start = "2026-01-01 00:00:00"
+start = "2025-01-01 00:00:00"
 end = "2026-06-30 23:59:59"
 x_time = 'payload_expected_time'
 output_dir = './data_collect/sample_s3/'
@@ -108,18 +108,16 @@ def export_to_parquet(df, y_col, start_date, end_date,
     )
     partition_dir.mkdir(parents=True, exist_ok=True)
 
-    file_name = (
-        f"data_{start.strftime('%Y')}.parquet"
-    )
-
-    file_path = partition_dir / file_name
     df = df.copy()
     df['raw_value'] = df[y_col]
     df['site_id'] = site_id
-    df['raw_value'] = df[y_col]
     cols = ['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'raw_value']
-    df[cols].to_parquet(file_path, index=False)
-    upload_to_s3(file_path, site_id, device_id, sensor_id, file_name)
+
+    for year, df_year in df.groupby(df[date_col].dt.year):
+        file_name = f"data_{year}.parquet"
+        file_path = partition_dir / file_name
+        df_year[cols].to_parquet(file_path, index=False)
+        upload_to_s3(file_path, site_id, device_id, sensor_id, file_name)
 
 def db_connect(type='prod'):    
     load_dotenv()
@@ -147,7 +145,7 @@ log_path = Path(output_dir) / 'process_log.log'
 log_path.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(filename=log_path, level=logging.INFO, format='%(asctime)s %(message)s')
 logger = logging.getLogger(__name__)
-for i, row in tqdm(devices_list.iterrows()):
+for i, row in tqdm(devices_list.iterrows(), total=len(devices_list)):
     error_dict = {"device":row.device_id, "start":start, 'end':end,
                     "sensor_name":row.sensor_id}
     df = prod_client.query_df(f"""
@@ -159,6 +157,10 @@ for i, row in tqdm(devices_list.iterrows()):
         AND sensor_id = '{row.sensor_id}'
         ORDER BY {x_time} DESC
         settings max_rows_to_read = 10000000000000;""")
+    if df.empty:
+        error_dict['error'] = "no_data"
+        logger.info(json.dumps(error_dict))
+        continue
     uniq_ent = df.entity.value_counts().index[0] # filter to remove duplicatas from multiple entities
     df = df[df.entity==uniq_ent]
     y_column = 'sum_payload_value_hour_curr'
