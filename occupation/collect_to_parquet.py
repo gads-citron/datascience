@@ -1,5 +1,5 @@
-# import subprocess, sys
-# subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"])
+import subprocess, sys
+subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"])
 
 import pandas as pd
 from pathlib import Path
@@ -13,6 +13,7 @@ import boto3
 import logging
 from tqdm import tqdm
 import param as p
+import json
 
 #%% collect parameters
 start = "2026-01-01 00:00:00"
@@ -89,7 +90,6 @@ def upload_to_s3(local_path, site_id, device_id, sensor_id, file_name):
     )
     s3_client.upload_file(str(local_path), S3_BUCKET, key)
 
-
 def export_to_parquet(df, y_col, start_date, end_date,
                             site_id, device_id, sensor_id, output_dir):
     date_col = 'payload_expected_time'
@@ -147,8 +147,7 @@ log_path = Path(output_dir) / 'process_log.log'
 log_path.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(filename=log_path, level=logging.INFO, format='%(asctime)s %(message)s')
 logger = logging.getLogger(__name__)
-for i, row in tqdm(devices_list[:5].iterrows()):
-    break
+for i, row in tqdm(devices_list.iterrows()):
     error_dict = {"device":row.device_id, "start":start, 'end':end,
                     "sensor_name":row.sensor_id}
     df = prod_client.query_df(f"""
