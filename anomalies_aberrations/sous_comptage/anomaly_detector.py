@@ -1,26 +1,6 @@
-import os
-import urllib.parse
 import numpy as np
-from dotenv import load_dotenv
-import clickhouse_connect
 from sklearn.ensemble import IsolationForest
 from statsmodels.tsa.seasonal import STL
-
-class ClickHouseClient:
-    def __init__(self):
-        load_dotenv()
-        host = urllib.parse.quote_plus(os.environ.get("clk_prod"))
-        username = urllib.parse.quote_plus(os.environ.get("USER_NAME"))
-        password = urllib.parse.quote_plus(os.environ.get("clk_prod_pass"))
-
-        self.client = clickhouse_connect.get_client(
-            host=host,
-            username=username,
-            password=password,
-            port=443
-        )
-    def query(self, q):
-        return self.client.query_df(q)
 
 class DataProcessor:
     def __init__(self, res, df):
@@ -80,9 +60,11 @@ class Detector:
         self.df['hour_week'] = (self.df.day_week * 24 + self.df.hour).astype('float32')
 
         isof.fit(self.df[['hour_week', self.y_name]])
-        scores = isof.score_samples(self.df[['hour_week', self.y_name]])
+        # scores = isof.score_samples(self.df[['hour_week', self.y_name]])
         # sns.lineplot(x = np.arange(1, scores.shape[0]+1), y = np.sort(scores))
 
-        isof.offset_ = np.percentile(scores, th)
+        # isof.offset_ = np.percentile(scores, th)
+        isof.offset_ = th
+
         isof.decision_function(self.df[['hour_week', self.y_name]])
         return isof.predict(self.df[['hour_week', self.y_name]]) == -1
