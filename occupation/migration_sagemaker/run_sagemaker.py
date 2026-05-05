@@ -21,8 +21,8 @@ for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         if not key.endswith(".parquet"):
             continue
         parts = Path(key[len(prefix):]).parts
-        if len(parts) >= 3:  # site / equip / sensor / file
-            dev_prefixes.add(prefix + "/".join(parts[:2]) + "/")
+        if len(parts) >= 4:  # site / equip / sensor / file
+            dev_prefixes.add(prefix + "/".join(parts[:3]) + "/")
 
 
 # upload dependency files to S3 (latest version uploaded on each run)
@@ -42,7 +42,7 @@ for dev_prefix in sorted(dev_prefixes):
     timestamp = dt.datetime.now().strftime("%H%M%S")
     device_path = dev_prefix[len(prefix):]  # site=X/equip=Y/
     parts = device_path.strip("/").split("/")  # ["site=x", "device_id=y"]
-    device_id = parts[1].split("=")[-1]
+    device_id = parts[2].split("=")[-1]
 
     processor.run(
         code=preprocessing_script,
