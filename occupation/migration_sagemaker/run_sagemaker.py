@@ -10,7 +10,7 @@ preprocessing_script = os.path.join(script_dir, "preprocessing.py")
 
 s3 = boto3.client("s3")
 bucket = "gads-citron-sagemaker-custom-stage"
-prefix = "data/power_clk_collect/"
+prefix = "data/occupation/power_clk_collect/"
 deps_prefix = "code/occupation/deps/"
 
 paginator = s3.get_paginator("list_objects_v2")
@@ -42,7 +42,7 @@ for dev_prefix in sorted(dev_prefixes):
     timestamp = dt.datetime.now().strftime("%H%M%S")
     device_path = dev_prefix[len(prefix):]  # site=X/equip=Y/
     parts = device_path.strip("/").split("/")  # ["site=x", "device_id=y"]
-    device_id = parts[2].split("=")[-1]
+    device_id = parts[1].split("=")[-1]
 
     processor.run(
         code=preprocessing_script,
@@ -59,7 +59,7 @@ for dev_prefix in sorted(dev_prefixes):
         outputs=[
             ProcessingOutput(
                 source="/opt/ml/processing/output",
-                destination=f"s3://{bucket}/data/processed/{device_path.rstrip('/')}/"
+                destination=f"s3://{bucket}/data/occupation/processed/{device_path.rstrip('/')}/"
             )
         ],
         job_name = f"dev{device_id}-{timestamp}",
