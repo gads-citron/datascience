@@ -66,7 +66,7 @@ processor = ScriptProcessor(
 )
 
 sm_client = boto3.client("sagemaker")
-all_prefixes = sorted(dev_prefixes[20:])
+all_prefixes = sorted(dev_prefixes)[20:]
 
 for batch_start in range(0, len(all_prefixes), BATCH_SIZE):
     batch = all_prefixes[batch_start:batch_start + BATCH_SIZE]
