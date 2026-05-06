@@ -88,7 +88,7 @@ for batch_start in range(0, len(all_prefixes), BATCH_SIZE):
             outputs=[
                 ProcessingOutput(
                     source="/opt/ml/processing/output",
-                    destination=f"s3://{bucket}/data/occupation/processed/{device_path.rstrip('/')}/"
+                    destination=f"s3://{bucket}/data/occupation/processed/power/{device_path.rstrip('/')}/"
                 )
             ],
             job_name=job_name,
