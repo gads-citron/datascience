@@ -11,7 +11,8 @@ BATCH_SIZE = 7
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
 
-def wait_for_jobs(sm_client, job_names):
+def wait_for_jobs(sm_client, job_names, timeout_minutes=15):
+    start_times = {name: time.time() for name in job_names}
     while True:
         statuses = {
             name: sm_client.describe_processing_job(ProcessingJobName=name)["ProcessingJobStatus"]
@@ -20,6 +21,11 @@ def wait_for_jobs(sm_client, job_names):
         in_progress = [n for n, s in statuses.items() if s in ("InProgress", "Stopping")]
         if not in_progress:
             break
+        for name in in_progress:
+            elapsed = (time.time() - start_times[name]) / 60
+            if elapsed > timeout_minutes and statuses[name] == "InProgress":
+                logging.warning(f"{name} dépasse {timeout_minutes}mn — stop")
+                sm_client.stop_processing_job(ProcessingJobName=name)
         logging.info(f"{len(in_progress)}/{len(job_names)} jobs en cours...")
         time.sleep(60)
     failed = [n for n, s in statuses.items() if s == "Failed"]
@@ -60,7 +66,7 @@ processor = ScriptProcessor(
 )
 
 sm_client = boto3.client("sagemaker")
-all_prefixes = sorted(dev_prefixes)
+all_prefixes = sorted(dev_prefixes[20:])
 
 for batch_start in range(0, len(all_prefixes), BATCH_SIZE):
     batch = all_prefixes[batch_start:batch_start + BATCH_SIZE]
