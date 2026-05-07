@@ -1,3 +1,4 @@
+import inspect
 import numpy as np
 from sklearn.ensemble import IsolationForest
 from statsmodels.tsa.seasonal import STL
@@ -32,12 +33,23 @@ class DataProcessor:
         return 0 if score > tol else 1  # 0=volume, 1=index
 
 class Detector:
-    def __init__(self, df, y_name):
-        self.df = df
-        self.y_name = y_name
+    def __init__(self, method, param):
+        self.x_time = 'payload_expected_time'
+        self.detect_fn = getattr(self, method)
+        defaults = {
+            k: v.default
+            for k, v in inspect.signature(self.detect_fn).parameters.items()
+            if v.default is not inspect.Parameter.empty
+        }
+        defaults.update(param)
+        self.param = defaults
 
-    def iqr(self, k=100):
-        s = self.df[self.y_name]
+    def predict(self, df, y_name):
+        df['anomaly'] = self.detect_fn(df, y_name, **self.param)
+        return df
+
+    def iqr(self, df, y_name, k=100):
+        s = df[y_name]
         q25, q75 = np.percentile(s, [25, 75])
         iqr = q75 - q25
         if iqr < 1:
@@ -46,25 +58,25 @@ class Detector:
         th = q75 + cutoff
         return s > th
 
-    def stl(self, k=3):
-        s = self.df.set_index('payload_expected_time')[self.y_name].asfreq('h').interpolate()
+    def stl(self, df, y_name, k=3):
+        s = df.set_index(self.x_time)[y_name].asfreq('h').interpolate()
         decomp = STL(s, period=168, robust=True).fit()
         resid = decomp.resid
         anomalies = resid.abs() > k * resid.std()
-        return anomalies.reindex(self.df.payload_expected_time).fillna(False).values
+        return anomalies.reindex(df.payload_expected_time).fillna(False).values
 
-    def iso_forest(self, th=2):
+    def iso_forest(self, df, y_name, th=2):
         isof = IsolationForest(n_estimators=500)
-        self.df['hour'] = self.df.payload_expected_time.dt.hour
-        self.df['day_week'] = self.df.payload_expected_time.dt.day_of_week
-        self.df['hour_week'] = (self.df.day_week * 24 + self.df.hour).astype('float32')
+        df['hour'] = df.payload_expected_time.dt.hour
+        df['day_week'] = df.payload_expected_time.dt.day_of_week
+        df['hour_week'] = (df.day_week * 24 + df.hour).astype('float32')
 
-        isof.fit(self.df[['hour_week', self.y_name]])
-        # scores = isof.score_samples(self.df[['hour_week', self.y_name]])
+        isof.fit(df[['hour_week', y_name]])
+        # scores = isof.score_samples(df[['hour_week', y_name]])
         # sns.lineplot(x = np.arange(1, scores.shape[0]+1), y = np.sort(scores))
 
         # isof.offset_ = np.percentile(scores, th)
         isof.offset_ = th
 
-        isof.decision_function(self.df[['hour_week', self.y_name]])
-        return isof.predict(self.df[['hour_week', self.y_name]]) == -1
+        isof.decision_function(df[['hour_week', y_name]])
+        return isof.predict(df[['hour_week', y_name]]) == -1

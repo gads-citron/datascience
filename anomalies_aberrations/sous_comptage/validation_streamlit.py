@@ -6,7 +6,7 @@ import citron_colors as col
 from db_connector import ClickHouseClient
 
 # ── config ────────────────────────────────────────────────────────────────────
-INPUT_FOLDER  = './data/sample_pic_query_clk'
+INPUT_FOLDER  = './data/sample_anomalies_2025_sem_1'
 CSV_PATH      = f'{INPUT_FOLDER}/verite_terrain.csv'
 SOUS_COMPTAGE = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
 START         = '2025-01-01 00:00:00'
