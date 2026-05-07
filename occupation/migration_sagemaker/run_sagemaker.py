@@ -51,11 +51,10 @@ for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
         if len(parts) >= 4:  # site / equip / sensor / file
             dev_prefixes.add(prefix + "/".join(parts[:3]) + "/")
 
-
 # upload dependency files to S3 (latest version uploaded on each run)
 for dep in ["Seasonality.py", "decompose.py", "tools.py"]:
     s3.upload_file(os.path.join(script_dir, dep), bucket, deps_prefix + dep)
-
+s3.upload_file(os.path.join(script_dir, "preprocessing.py"), bucket, deps_prefix + "preprocessing.py")
 role = get_execution_role()
 processor = ScriptProcessor(
     image_uri="444505633365.dkr.ecr.eu-west-3.amazonaws.com/sagemaker:v1.0.0",
@@ -66,7 +65,7 @@ processor = ScriptProcessor(
 )
 
 sm_client = boto3.client("sagemaker")
-all_prefixes = sorted(dev_prefixes)[20:]
+all_prefixes = sorted(dev_prefixes)[315:]
 
 for batch_start in range(0, len(all_prefixes), BATCH_SIZE):
     batch = all_prefixes[batch_start:batch_start + BATCH_SIZE]
@@ -104,5 +103,3 @@ for batch_start in range(0, len(all_prefixes), BATCH_SIZE):
 
     logging.info(f"Batch {batch_start // BATCH_SIZE + 1} lancé ({len(batch)} jobs)")
     wait_for_jobs(sm_client, job_names)
-
-
