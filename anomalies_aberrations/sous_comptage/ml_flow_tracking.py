@@ -1,35 +1,41 @@
-import mlflow
-import pandas as pd
-from sklearn import datasets
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import os
+import experiment_run as exp
 
-mlflow.set_tracking_uri("URI_MLFLOW")
-mlflow.set_experiment("MLflow Quickstart")
+ANOM_DIR = os.environ.get(
+    "ANOM_DIR",
+    "s3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary"
+)
 
-with mlflow.start_run(run_name="test_logit_dataset_iris"):
-    mlflow.set_tag("mlflow.note.content", """
-    Test classification .
-    - Données : dataset iris open source de scikit learn
-    - Objectif : classer les individus sur la base des features 
-    - Params : train/test split avec une proportion 80/20
-    - Observation : juste pour l'experience
-    """)
-    # Load the Iris dataset
-    X, y = datasets.load_iris(return_X_y=True)
+BASE_DESCRIPTION = (
+    "Analyse sur les données de sous-comptage 1er semestre 2025 uniquement, tous sites confondus. "
+    "Les anomalies sont détectées avec la méthode {method} (params : {params}) "
+    "sur des périodes glissantes de {window} semaines."
+)
+WINDOW = 4
 
-    # Split the data into training and test sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+configs = [
+    {"method": "iso_forest","param": {"th": -0.6},},
+    {"method": "iso_forest","param": {"th": -0.5},},
+    {"method": "iso_forest","param": {"th": -0.4},},
+    {"method": "iqr","param": {"k": 1.5},},
+    {"method": "iqr","param": {"k": 5},},
+    {"method": "iqr", "param": {"k": 10},},
+    {"method": "stl", "param": {"k": 1.5},},
+    {"method": "stl", "param": {"k": 3},},
+    {"method": "stl", "param": {"k": 10},},
+]
 
-    # Define the model hyperparameters
-    params = {
-        "solver": "lbfgs",
-        "max_iter": 1000,
-        "random_state": 8888,
-    }
-    # Enable autologging for scikit-learn
-    mlflow.sklearn.autolog()
-    # Just train the model normally
-    lr = LogisticRegression(**params)
-    lr.fit(X_train, y_train)
+for cfg in configs:
+    params_str = ", ".join(f"{k}={v}" for k, v in cfg["param"].items())
+    description = BASE_DESCRIPTION.format(
+        method=cfg["method"],
+        params=params_str,
+        window=WINDOW,
+    )
+    exp.run(
+        method=cfg["method"],
+        window=WINDOW,
+        param=cfg["param"],
+        anom_dir=ANOM_DIR,
+        description=description,
+    )

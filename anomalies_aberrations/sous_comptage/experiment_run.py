@@ -2,6 +2,8 @@ import argparse
 import mlflow
 import boto3
 import glob
+import tempfile
+import os
 from pathlib import Path
 import random
 import duckdb
@@ -107,6 +109,18 @@ def run(method, window, param, anom_dir, description="", n_sites=None):
         mlflow.log_metric("FN", fn)
         mlflow.log_metric("TN", tn)
         mlflow.log_metric("FP", fp)
+
+        ref_cols = ['site_id', 'device_id', 'sensor_id', 'payload_expected_time']
+        fp_df = merged.loc[(merged['VT_myriam'] == 0) & (merged['anomaly'] == 1), ref_cols]
+        fn_df = merged.loc[(merged['VT_myriam'] == 1) & (merged['anomaly'] == 0), ref_cols]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fp_path = os.path.join(tmp, "false_positives.csv")
+            fn_path = os.path.join(tmp, "false_negatives.csv")
+            fp_df.to_csv(fp_path, index=False)
+            fn_df.to_csv(fn_path, index=False)
+            mlflow.log_artifact(fp_path)
+            mlflow.log_artifact(fn_path)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
