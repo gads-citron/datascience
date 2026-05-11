@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import mlflow
 import boto3
 import glob
@@ -7,9 +8,25 @@ import os
 from pathlib import Path
 import duckdb
 import pandas as pd
+import joblib
 from joblib import Parallel, delayed
+from tqdm import tqdm
 from anomaly_detector import Detector
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+
+@contextlib.contextmanager
+def tqdm_joblib(tqdm_object):
+    class _Callback(joblib.parallel.BatchCompletionCallBack):
+        def __call__(self, *args, **kwargs):
+            tqdm_object.update(n=self.batch_size)
+            return super().__call__(*args, **kwargs)
+    old = joblib.parallel.BatchCompletionCallBack
+    joblib.parallel.BatchCompletionCallBack = _Callback
+    try:
+        yield tqdm_object
+    finally:
+        joblib.parallel.BatchCompletionCallBack = old
+        tqdm_object.close()
 
 URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN'
 
@@ -61,13 +78,15 @@ def run(method, window, param, anom_dir, description=""):
         vt = pd.read_csv(f"{anom_dir}/verite_terrain.csv")
     vt['payload_expected_time'] = pd.to_datetime(vt['payload_expected_time'],
                                                   format='mixed', utc=True).dt.tz_convert(None)
-    site_ids = vt['site_id'].unique().tolist()
+    site_ids = vt.loc[vt['VT_myriam'] == 1, 'site_id'].unique().tolist()
     df = load_all_parquets(anom_dir, site_ids=site_ids)
-    results = Parallel(n_jobs=-1)(
-        delayed(classify_data)(g, method, window, param)
-        for _, g in df.groupby(['site_id', 'device_id', 'sensor_id'])
-    )
-    anom_df = pd.concat(results, ignore_index=True)
+    groups = list(df.groupby(['site_id', 'device_id', 'sensor_id']))
+    with tqdm_joblib(tqdm(total=len(groups), desc="Classification")):
+        results = Parallel(n_jobs=-1)(
+            delayed(classify_data)(g, method, window, param)
+            for _, g in groups
+        )
+    anom_df = pd.concat([r for r in results if not r.empty], ignore_index=True)
     merged = vt.merge(
         anom_df[['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'anomaly']],
         on=['site_id', 'device_id', 'sensor_id', 'payload_expected_time'],
