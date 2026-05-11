@@ -1,4 +1,5 @@
 import os
+from joblib import Parallel, delayed
 import experiment_run as exp
 
 ANOM_DIR = os.environ.get(
@@ -14,18 +15,18 @@ BASE_DESCRIPTION = (
 WINDOW = 4
 
 configs = [
-    {"method": "iso_forest","param": {"th": -0.6},},
-    {"method": "iso_forest","param": {"th": -0.5},},
-    {"method": "iso_forest","param": {"th": -0.4},},
-    {"method": "iqr","param": {"k": 1.5},},
-    {"method": "iqr","param": {"k": 5},},
-    {"method": "iqr", "param": {"k": 10},},
-    {"method": "stl", "param": {"k": 1.5},},
-    {"method": "stl", "param": {"k": 3},},
-    {"method": "stl", "param": {"k": 10},},
+    {"method": "iso_forest", "param": {"th": -0.6}},
+    {"method": "iso_forest", "param": {"th": -0.5}},
+    {"method": "iso_forest", "param": {"th": -0.4}},
+    {"method": "iqr",        "param": {"k": 1.5}},
+    {"method": "iqr",        "param": {"k": 5}},
+    {"method": "iqr",        "param": {"k": 10}},
+    {"method": "stl",        "param": {"k": 1.5}},
+    {"method": "stl",        "param": {"k": 3}},
+    {"method": "stl",        "param": {"k": 10}},
 ]
 
-for cfg in configs:
+def run_cfg(cfg):
     params_str = ", ".join(f"{k}={v}" for k, v in cfg["param"].items())
     description = BASE_DESCRIPTION.format(
         method=cfg["method"],
@@ -39,3 +40,5 @@ for cfg in configs:
         anom_dir=ANOM_DIR,
         description=description,
     )
+
+Parallel(n_jobs=3, backend="loky")(delayed(run_cfg)(cfg) for cfg in configs)
