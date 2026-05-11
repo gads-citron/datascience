@@ -5,7 +5,6 @@ import glob
 import tempfile
 import os
 from pathlib import Path
-import random
 import duckdb
 import pandas as pd
 from joblib import Parallel, delayed
@@ -23,31 +22,14 @@ def _duckdb_con(folder: str):
         con.execute("INSTALL httpfs; LOAD httpfs; CALL load_aws_credentials();")
     return con
 
-def sample_sites(folder: str, n: int = 10) -> list:
-    if _is_s3(folder):
-        parts = folder.replace("s3://", "", 1).split("/", 1)
-        bucket, prefix = parts[0], (parts[1].rstrip("/") + "/") if len(parts) > 1 else ""
-        s3 = boto3.client("s3")
-        resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
-        all_sites = [cp["Prefix"].rstrip("/").split("/")[-1].split("=")[1]
-                     for cp in resp.get("CommonPrefixes", [])
-                     if cp["Prefix"].rstrip("/").split("/")[-1].startswith("site_id=")]
-    else:
-        base = Path(__file__).parent / folder
-        all_sites = [p.name.split("=")[1] for p in base.iterdir() if p.is_dir() and p.name.startswith("site_id=")]
-    return random.sample(all_sites, min(n, len(all_sites)))
-
-def load_all_parquets(folder: str, site_ids: list = None) -> pd.DataFrame:
+def load_all_parquets(folder: str, site_ids: list) -> pd.DataFrame:
     """ charge tous les fichiers parquet partitionnés depuis un dossier local ou S3 (s3://bucket/path/) """
     if _is_s3(folder):
         con = _duckdb_con(folder)
-        paths = [f"{folder}/site_id={s}/**/*.parquet" for s in site_ids] if site_ids else [f"{folder}/**/*.parquet"]
+        paths = [f"{folder}/site_id={s}/**/*.parquet" for s in site_ids]
         return con.execute(f"SELECT * FROM read_parquet({paths}, hive_partitioning=true)").df()
     base = Path(__file__).parent / folder
-    if site_ids:
-        files = [f for s in site_ids for f in glob.glob(str(base / f"site_id={s}" / "**" / "*.parquet"), recursive=True)]
-    else:
-        files = glob.glob(str(base / "**" / "*.parquet"), recursive=True)
+    files = [f for s in site_ids for f in glob.glob(str(base / f"site_id={s}" / "**" / "*.parquet"), recursive=True)]
     return duckdb.sql(f"SELECT * FROM read_parquet({[str(f) for f in files]})").df()
 
 def classify_data(smp, method, w, param):
@@ -69,15 +51,7 @@ def classify_data(smp, method, w, param):
         current += delta
     return pd.concat(anomalies, ignore_index=True) if anomalies else pd.DataFrame()
 
-def run(method, window, param, anom_dir, description="", n_sites=None):
-    #%% load data and process anomaly classification experiment
-    site_ids = sample_sites(anom_dir, n_sites) if n_sites else None
-    df = load_all_parquets(anom_dir, site_ids=site_ids)
-    results = Parallel(n_jobs=-1)(
-        delayed(classify_data)(g, method, window, param)
-        for _, g in df.groupby(['site_id', 'device_id', 'sensor_id'])
-    )
-    anom_df = pd.concat(results, ignore_index=True)
+def run(method, window, param, anom_dir, description=""):
     if _is_s3(anom_dir):
         parts = anom_dir.replace("s3://", "", 1).split("/", 1)
         bucket, prefix = parts[0], parts[1].rstrip("/")
@@ -87,6 +61,13 @@ def run(method, window, param, anom_dir, description="", n_sites=None):
         vt = pd.read_csv(f"{anom_dir}/verite_terrain.csv")
     vt['payload_expected_time'] = pd.to_datetime(vt['payload_expected_time'],
                                                   format='mixed', utc=True).dt.tz_convert(None)
+    site_ids = vt['site_id'].unique().tolist()
+    df = load_all_parquets(anom_dir, site_ids=site_ids)
+    results = Parallel(n_jobs=-1)(
+        delayed(classify_data)(g, method, window, param)
+        for _, g in df.groupby(['site_id', 'device_id', 'sensor_id'])
+    )
+    anom_df = pd.concat(results, ignore_index=True)
     merged = vt.merge(
         anom_df[['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'anomaly']],
         on=['site_id', 'device_id', 'sensor_id', 'payload_expected_time'],
@@ -129,6 +110,5 @@ if __name__ == "__main__":
     parser.add_argument('--window', type=int, default=4, help="fenêtre en nombre de semaines")
     parser.add_argument('--anom_dir', type=str, required=True)
     parser.add_argument('--description', type=str, default="")
-    parser.add_argument('--n_sites', type=int, default=None, help="nb de sites à échantillonner aléatoirement")
     args = parser.parse_args()
-    run(args.method, args.window, args.param, args.anom_dir, args.description, args.n_sites)
+    run(args.method, args.window, args.param, args.anom_dir, args.description)
