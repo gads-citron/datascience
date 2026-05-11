@@ -1,14 +1,50 @@
 import argparse
 import mlflow
+import boto3
+import glob
+from pathlib import Path
+import random
+import duckdb
 import pandas as pd
-import pyarrow.dataset as ds
+from joblib import Parallel, delayed
 from anomaly_detector import Detector
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 
-def load_all_parquets(folder: str) -> pd.DataFrame:
+def _is_s3(folder: str) -> bool:
+    return folder.startswith("s3://")
+
+def _duckdb_con(folder: str):
+    con = duckdb.connect()
+    if _is_s3(folder):
+        con.execute("INSTALL httpfs; LOAD httpfs; CALL load_aws_credentials();")
+    return con
+
+def sample_sites(folder: str, n: int = 10) -> list:
+    if _is_s3(folder):
+        parts = folder.replace("s3://", "", 1).split("/", 1)
+        bucket, prefix = parts[0], (parts[1].rstrip("/") + "/") if len(parts) > 1 else ""
+        s3 = boto3.client("s3")
+        resp = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter="/")
+        all_sites = [cp["Prefix"].rstrip("/").split("/")[-1].split("=")[1]
+                     for cp in resp.get("CommonPrefixes", [])
+                     if cp["Prefix"].rstrip("/").split("/")[-1].startswith("site_id=")]
+    else:
+        base = Path(__file__).parent / folder
+        all_sites = [p.name.split("=")[1] for p in base.iterdir() if p.is_dir() and p.name.startswith("site_id=")]
+    return random.sample(all_sites, min(n, len(all_sites)))
+
+def load_all_parquets(folder: str, site_ids: list = None) -> pd.DataFrame:
     """ charge tous les fichiers parquet partitionnés depuis un dossier local ou S3 (s3://bucket/path/) """
-    dataset = ds.dataset(folder, format="parquet", partitioning="hive")
-    return dataset.to_table().to_pandas()
+    if _is_s3(folder):
+        con = _duckdb_con(folder)
+        paths = [f"{folder}/site_id={s}/**/*.parquet" for s in site_ids] if site_ids else [f"{folder}/**/*.parquet"]
+        return con.execute(f"SELECT * FROM read_parquet({paths}, hive_partitioning=true)").df()
+    base = Path(__file__).parent / folder
+    if site_ids:
+        files = [f for s in site_ids for f in glob.glob(str(base / f"site_id={s}" / "**" / "*.parquet"), recursive=True)]
+    else:
+        files = glob.glob(str(base / "**" / "*.parquet"), recursive=True)
+    return duckdb.sql(f"SELECT * FROM read_parquet({[str(f) for f in files]})").df()
 
 def classify_data(smp, method, w, param):
     """ avec un jeu de données """
@@ -25,26 +61,35 @@ def classify_data(smp, method, w, param):
         if not window.empty:
             detector.predict(window, "raw_value")
             mask = window['anomaly'] == 1
-            anomalies.append(
-                window.loc[mask, ['customer_account_name', 'site_id', 'device_id', 'sensor_id', 'device_name', 'sensor_name',
-                               'payload_expected_time', 'feature', 'value', 'med_max20', 'anomaly']])
+            anomalies.append(window.loc[mask])
         current += delta
     return pd.concat(anomalies, ignore_index=True) if anomalies else pd.DataFrame()
 
-def run(method, window, param, anom_dir, description=""):
+def run(method, window, param, anom_dir, description="", n_sites=None):
     #%% load data and process anomaly classification experiment
-    df = load_all_parquets(anom_dir)
-    anom_df = pd.concat(
-        [classify_data(g, method, window, param) for _, g in df.groupby(['site_id', 'device_id', 'sensor_id'])],
-        ignore_index=True
+    site_ids = sample_sites(anom_dir, n_sites) if n_sites else None
+    df = load_all_parquets(anom_dir, site_ids=site_ids)
+    results = Parallel(n_jobs=-1)(
+        delayed(classify_data)(g, method, window, param)
+        for _, g in df.groupby(['site_id', 'device_id', 'sensor_id'])
     )
-    vt = pd.read_csv(f"{anom_dir}/verite_terrain.csv")
+    anom_df = pd.concat(results, ignore_index=True)
+    if _is_s3(anom_dir):
+        parts = anom_dir.replace("s3://", "", 1).split("/", 1)
+        bucket, prefix = parts[0], parts[1].rstrip("/")
+        obj = boto3.client("s3").get_object(Bucket=bucket, Key=f"{prefix}/verite_terrain.csv")
+        vt = pd.read_csv(obj["Body"])
+    else:
+        vt = pd.read_csv(f"{anom_dir}/verite_terrain.csv")
+    vt['payload_expected_time'] = pd.to_datetime(vt['payload_expected_time'],
+                                                  format='mixed', utc=True).dt.tz_convert(None)
     merged = vt.merge(
         anom_df[['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'anomaly']],
         on=['site_id', 'device_id', 'sensor_id', 'payload_expected_time'],
         how='left'
     )
     merged['anomaly'] = merged['anomaly'].fillna(0).astype(int)
+    tn, fp, fn, tp = confusion_matrix(merged['VT_myriam'], merged['anomaly']).ravel()
     mlflow.set_tracking_uri("URI_MLFLOW")
     mlflow.set_experiment("Sous-Comptage_Anomaly-Detection")
     datetime = pd.Timestamp.now().strftime("%m%d-%H%M")
@@ -56,6 +101,10 @@ def run(method, window, param, anom_dir, description=""):
         mlflow.log_metric("precision", precision_score(merged['VT_myriam'], merged['anomaly']))
         mlflow.log_metric("recall", recall_score(merged['VT_myriam'], merged['anomaly']))
         mlflow.log_metric("f1", f1_score(merged['VT_myriam'], merged['anomaly']))
+        mlflow.log_metric("TP", tp)
+        mlflow.log_metric("FN", fn)
+        mlflow.log_metric("TN", tn)
+        mlflow.log_metric("FP", fp)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -64,5 +113,6 @@ if __name__ == "__main__":
     parser.add_argument('--window', type=int, default=4, help="fenêtre en nombre de semaines")
     parser.add_argument('--anom_dir', type=str, required=True)
     parser.add_argument('--description', type=str, default="")
+    parser.add_argument('--n_sites', type=int, default=None, help="nb de sites à échantillonner aléatoirement")
     args = parser.parse_args()
-    run(args.method, args.window, args.param, args.anom_dir, args.description)
+    run(args.method, args.window, args.param, args.anom_dir, args.description, args.n_sites)
