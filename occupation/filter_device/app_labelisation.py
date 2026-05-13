@@ -7,25 +7,20 @@ import boto3
 import io
 from botocore.exceptions import ClientError
 
-INPUT_FOLDER = 's3://YOUR-BUCKET/YOUR-PREFIX/'            # à remplacer
-CSV_PATH     = 's3://YOUR-BUCKET/YOUR-PREFIX/selections.csv'  # à remplacer
+BUCKET  = "gads-citron-sagemaker-custom-stage"
+PREFIX  = "data/occupation/processed/power/"
+CSV_KEY = f"{PREFIX}verite_terrain.csv"
 
 st.set_page_config(page_title='Labelling occupation', layout='wide')
 
 s3 = boto3.client('s3')
 
 
-def _parse_s3(path):
-    without_scheme = path.replace('s3://', '')
-    bucket, _, key = without_scheme.partition('/')
-    return bucket, key
-
 @st.cache_data(show_spinner='Scan des fichiers…')
-def load_parquet_files(folder):
+def load_parquet_files():
     files = []
-    bucket, prefix = _parse_s3(folder)
     paginator = s3.get_paginator('list_objects_v2')
-    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+    for page in paginator.paginate(Bucket=BUCKET, Prefix=PREFIX):
         for obj in page.get('Contents', []):
             key = obj['Key']
             if not key.endswith('.parquet'):
@@ -37,15 +32,15 @@ def load_parquet_files(folder):
                     'site_id':   parts.get('site_id', ''),
                     'device_id': parts.get('device_id', ''),
                     'sensor_id': parts.get('sensor_id', ''),
-                    'path':      f's3://{bucket}/{key}',
+                    'path':      f's3://{BUCKET}/{key}',
                 })
     return pd.DataFrame(files)
 
 
 @st.cache_data(show_spinner='Chargement série…')
 def load_series(path):
-    bucket, key = _parse_s3(path)
-    obj = s3.get_object(Bucket=bucket, Key=key)
+    key = path.replace(f's3://{BUCKET}/', '')
+    obj = s3.get_object(Bucket=BUCKET, Key=key)
     df = pd.read_parquet(io.BytesIO(obj['Body'].read()))
     df['payload_expected_time'] = pd.to_datetime(df['payload_expected_time'])
     df = df.sort_values('payload_expected_time')
@@ -54,147 +49,158 @@ def load_series(path):
 
 
 # ── données ──────────────────────────────────────────────────────────────────
-all_files = load_parquet_files(INPUT_FOLDER)
+all_files  = load_parquet_files()
+
+# dossiers = combinaisons uniques (site_id, device_id, sensor_id)
+folders_df = all_files[['site_id', 'device_id', 'sensor_id']].drop_duplicates().reset_index(drop=True)
+n_folders  = len(folders_df)
+
+# devices = pour le suivi du labelling
+devices_df = all_files[['site_id', 'device_id']].drop_duplicates().reset_index(drop=True)
+n_devices  = len(devices_df)
+
 
 def _load_selections():
-    bucket, key = _parse_s3(CSV_PATH)
     try:
-        obj = s3.get_object(Bucket=bucket, Key=key)
+        obj = s3.get_object(Bucket=BUCKET, Key=CSV_KEY)
         df = pd.read_csv(io.BytesIO(obj['Body'].read()))
-        for c in ['average_pattern', 'classif_svm', 'VT_Myriam']:
+        for c in ('VT_Myriam', 'parquet_file'):
             if c not in df.columns:
                 df[c] = pd.NA
         return df
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchKey':
-            return pd.DataFrame(columns=['site_id', 'device_id', 'sensor_id', 'selection',
-                                          'average_pattern', 'classif_svm', 'VT_Myriam'])
+            df = devices_df.copy()
+            df['VT_Myriam']    = pd.NA
+            df['parquet_file'] = pd.NA
+            return df
         raise
-
-needs_reload = (
-    'selections' not in st.session_state
-    or 'classif_svm' not in st.session_state.selections.columns
-    or st.session_state.selections['classif_svm'].isna().all()
-)
-if needs_reload:
-    st.session_state.selections = _load_selections()
-
-# filtrer : uniquement les profils avec une prédiction SVM
-sel_svm      = st.session_state.selections
-svm_rows     = sel_svm[sel_svm['classif_svm'].notna()]
-svm_keys = set(zip(
-    svm_rows['site_id'].astype(str),
-    svm_rows['device_id'].astype(str),
-))
-
-files_df = all_files[
-    all_files.apply(
-        lambda r: (str(r['site_id']), str(r['device_id'])) in svm_keys,
-        axis=1)
-].reset_index(drop=True)
-n_profiles = len(files_df)
-
-if 'idx' not in st.session_state:
-    vt_done = set(zip(
-        sel_svm.loc[sel_svm['VT_Myriam'].notna(), 'site_id'].astype(str),
-        sel_svm.loc[sel_svm['VT_Myriam'].notna(), 'device_id'].astype(str),
-    ))
-    st.session_state.idx = next(
-        (i for i, r in files_df.iterrows()
-         if (str(r['site_id']), str(r['device_id'])) not in vt_done),
-        0)
 
 
 def save():
-    bucket, key = _parse_s3(CSV_PATH)
     buf = io.StringIO()
     st.session_state.selections.to_csv(buf, index=False)
-    s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue().encode())
+    s3.put_object(Bucket=BUCKET, Key=CSV_KEY, Body=buf.getvalue().encode())
 
 
-def label(col, val):
-    row = files_df.iloc[st.session_state.idx]
-    sel  = st.session_state.selections
-    mask = (
-        (sel['site_id']   == row['site_id']) &
-        (sel['device_id'] == row['device_id'])
+if 'selections' not in st.session_state:
+    st.session_state.selections = _load_selections()
+
+if 'folder_idx' not in st.session_state:
+    st.session_state.folder_idx = 0
+    st.session_state.file_idx   = 0
+
+
+def prev_folder():
+    st.session_state.folder_idx -= 1
+    st.session_state.file_idx    = 0
+
+def next_folder():
+    st.session_state.folder_idx += 1
+    st.session_state.file_idx    = 0
+
+
+def label(val, path):
+    folder = folders_df.iloc[st.session_state.folder_idx]
+    sel    = st.session_state.selections
+    mask   = (
+        (sel['site_id'].astype(str)   == str(folder['site_id'])) &
+        (sel['device_id'].astype(str) == str(folder['device_id']))
     )
-    if mask.any():
-        st.session_state.selections.loc[mask, col] = val
-    else:
-        st.session_state.selections = pd.concat(
-            [sel, pd.DataFrame([{
-                'site_id':    row['site_id'],
-                'device_id':  row['device_id'],
-                'sensor_id':  row['sensor_id'],
-                'selection':  pd.NA,
-                'average_pattern': pd.NA,
-                col:          val,
-            }])], ignore_index=True)
+    st.session_state.selections.loc[mask, 'VT_Myriam']    = val
+    st.session_state.selections.loc[mask, 'parquet_file'] = path.split('/')[-1].removesuffix('.parquet')
     save()
-    if st.session_state.idx < n_profiles - 1:
-        st.session_state.idx += 1
+    if st.session_state.folder_idx < n_folders - 1:
+        next_folder()
 
 
 # ── état courant ──────────────────────────────────────────────────────────────
-if n_profiles == 0:
-    st.warning('Aucun profil avec prédiction SVM trouvé. Lance d\'abord clustering_profiles.py.')
+if n_folders == 0:
+    st.warning('Aucun fichier parquet trouvé dans le préfixe S3.')
     st.stop()
 
-idx     = min(st.session_state.idx, n_profiles - 1)
-current = files_df.iloc[idx]
+folder_idx     = min(st.session_state.folder_idx, n_folders - 1)
+current_folder = folders_df.iloc[folder_idx]
+
+# fichiers du dossier courant
+folder_files = all_files[
+    (all_files['site_id'].astype(str)   == str(current_folder['site_id'])) &
+    (all_files['device_id'].astype(str) == str(current_folder['device_id'])) &
+    (all_files['sensor_id'].astype(str) == str(current_folder['sensor_id']))
+].reset_index(drop=True)
+n_files  = len(folder_files)
+file_idx = min(st.session_state.file_idx, n_files - 1)
+
+n_sensors_for_device = folders_df[
+    (folders_df['site_id'].astype(str)   == str(current_folder['site_id'])) &
+    (folders_df['device_id'].astype(str) == str(current_folder['device_id']))
+].shape[0]
+
+def advance_file():
+    if st.session_state.file_idx < n_files - 1:
+        st.session_state.file_idx += 1
+    elif n_sensors_for_device == 1 and st.session_state.folder_idx < n_folders - 1:
+        next_folder()
+
+current_path = folder_files.iloc[file_idx]['path']
 
 sel  = st.session_state.selections
 mask = (
-    (sel['site_id']   == current['site_id']) &
-    (sel['device_id'] == current['device_id'])
+    (sel['site_id'].astype(str)   == str(current_folder['site_id'])) &
+    (sel['device_id'].astype(str) == str(current_folder['device_id']))
 )
+
 def _first_valid(series):
     vals = series.dropna()
     return int(vals.iloc[0]) if len(vals) else None
 
-current_label           = _first_valid(sel.loc[mask, 'selection'])
-current_average_pattern = _first_valid(sel.loc[mask, 'average_pattern'])
-current_classif_svm     = _first_valid(sel.loc[mask, 'classif_svm'])
-current_vt_myriam       = _first_valid(sel.loc[mask, 'VT_Myriam'])
+current_vt_myriam = _first_valid(sel.loc[mask, 'VT_Myriam'])
 
 # ── sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title('Labelling occupation')
 
-    sel_ = st.session_state.selections
-    n_vt_myriam = sel_['VT_Myriam'].notna().sum() if 'VT_Myriam' in sel_.columns else 0
-    st.progress(int(n_vt_myriam) / n_profiles if n_profiles else 0,
-                text=f'{int(n_vt_myriam)} / {n_profiles} profils validés (VT_Myriam)')
+    n_vt_myriam = st.session_state.selections['VT_Myriam'].notna().sum()
+    st.progress(int(n_vt_myriam) / n_devices if n_devices else 0,
+                text=f'{int(n_vt_myriam)} / {n_devices} devices validés')
     st.divider()
 
-    st.subheader(f'Profil  {idx + 1} / {n_profiles}')
+    # navigation fichiers dans le dossier courant
+    st.subheader(f'Fichier  {file_idx + 1} / {n_files}')
     c1, c2 = st.columns(2)
-    c1.button('◀', disabled=(idx == 0), use_container_width=True,
-              on_click=lambda: st.session_state.update(idx=idx - 1))
-    c2.button('▶', disabled=(idx == n_profiles - 1), use_container_width=True,
-              on_click=lambda: st.session_state.update(idx=idx + 1))
+    c1.button('◀', key='prev_file', disabled=(file_idx == 0),
+              use_container_width=True,
+              on_click=lambda: st.session_state.update(file_idx=file_idx - 1))
+    next_file_disabled = (file_idx == n_files - 1) and (
+        n_sensors_for_device > 1 or folder_idx == n_folders - 1)
+    c2.button('▶', key='next_file', disabled=next_file_disabled,
+              use_container_width=True, on_click=advance_file)
+
+    # navigation dossiers sensor_id (uniquement si plusieurs sensors pour ce device)
+    if n_sensors_for_device > 1:
+        st.subheader(f'Dossier sensor  {folder_idx + 1} / {n_folders}')
+        s1, s2 = st.columns(2)
+        s1.button('◀', key='prev_folder', disabled=(folder_idx == 0),
+                  use_container_width=True, on_click=prev_folder)
+        s2.button('▶', key='next_folder', disabled=(folder_idx == n_folders - 1),
+                  use_container_width=True, on_click=next_folder)
 
     st.divider()
     st.subheader('VT_Myriam')
     st.button('Occupation', type='primary', use_container_width=True,
-              on_click=label, args=('VT_Myriam', 1))
-    st.button('Non-occupation',             use_container_width=True,
-              on_click=label, args=('VT_Myriam', 0))
+              on_click=label, args=(1, current_path))
+    st.button('Non-occupation', use_container_width=True,
+              on_click=label, args=(0, current_path))
 
 # ── header ────────────────────────────────────────────────────────────────────
-st.markdown(f"## Site `{current['site_id']}`")
-st.markdown(f"`{current['device_id']}` / `{current['sensor_id']}`")
+st.markdown(f"## Site `{current_folder['site_id']}`")
+st.markdown(f"`{current_folder['device_id']}` — `sensor_id={current_folder['sensor_id']}`")
 
-c1, c2, c3 = st.columns(3)
-svm_label = {1: '🤖 Occupation', 0: '🤖 Non-occupation'}.get(current_classif_svm, '—')
-vt_label  = {1: '✅ Occupation', 0: '❌ Non-occupation'}.get(current_vt_myriam, '—')
-c1.markdown(f"**Prédit SVM :** {svm_label}")
-c2.markdown(f"**VT_Myriam :** {vt_label}")
-c3.markdown(f"**average_pattern :** `{current_average_pattern}`" if current_average_pattern is not None else '**average_pattern :** —')
+vt_label = {1: '✅ Occupation', 0: '❌ Non-occupation'}.get(current_vt_myriam, '—')
+st.markdown(f"**VT_Myriam :** {vt_label}")
 
 # ── graphique ─────────────────────────────────────────────────────────────────
-smp = load_series(current['path'])
+smp = load_series(current_path)
 fig = go.Figure()
 if not smp.empty:
     fig.add_trace(go.Scatter(
