@@ -62,15 +62,15 @@ def _load_selections():
     try:
         obj = s3.get_object(Bucket=BUCKET, Key=CSV_KEY)
         df = pd.read_csv(io.BytesIO(obj['Body'].read()))
-        for c in ('VT_Myriam', 'parquet_file'):
+        for c in ('verite_terrain', 'parquet_file'):
             if c not in df.columns:
                 df[c] = pd.NA
         return df
     except ClientError as e:
         if e.response['Error']['Code'] == 'NoSuchKey':
-            df = devices_df.copy()
-            df['VT_Myriam']    = pd.NA
-            df['parquet_file'] = pd.NA
+            df = folders_df.copy()
+            df['verite_terrain'] = pd.NA
+            df['parquet_file']   = pd.NA
             return df
         raise
 
@@ -105,8 +105,8 @@ def label(val, path):
         (sel['site_id'].astype(str)   == str(folder['site_id'])) &
         (sel['device_id'].astype(str) == str(folder['device_id']))
     )
-    st.session_state.selections.loc[mask, 'VT_Myriam']    = val
-    st.session_state.selections.loc[mask, 'parquet_file'] = path.split('/')[-1].removesuffix('.parquet')
+    st.session_state.selections.loc[mask, 'verite_terrain'] = val
+    st.session_state.selections.loc[mask, 'parquet_file']  = path.split('/')[-1].removesuffix('.parquet')
     save()
     if st.session_state.folder_idx < n_folders - 1:
         next_folder()
@@ -152,15 +152,17 @@ def _first_valid(series):
     vals = series.dropna()
     return int(vals.iloc[0]) if len(vals) else None
 
-current_vt_myriam = _first_valid(sel.loc[mask, 'VT_Myriam'])
+current_vt = _first_valid(sel.loc[mask, 'verite_terrain'])
 
 # ── sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title('Labelling occupation')
 
-    n_vt_myriam = st.session_state.selections['VT_Myriam'].notna().sum()
-    st.progress(int(n_vt_myriam) / n_devices if n_devices else 0,
-                text=f'{int(n_vt_myriam)} / {n_devices} devices validés')
+    n_labeled = (st.session_state.selections
+                 .drop_duplicates(subset=['site_id', 'device_id'])['verite_terrain']
+                 .notna().sum())
+    st.progress(int(n_labeled) / n_devices if n_devices else 0,
+                text=f'{int(n_labeled)} / {n_devices} devices validés')
     st.divider()
 
     # navigation fichiers dans le dossier courant
@@ -174,17 +176,16 @@ with st.sidebar:
     c2.button('▶', key='next_file', disabled=next_file_disabled,
               use_container_width=True, on_click=advance_file)
 
-    # navigation dossiers sensor_id (uniquement si plusieurs sensors pour ce device)
-    if n_sensors_for_device > 1:
-        st.subheader(f'Dossier sensor  {folder_idx + 1} / {n_folders}')
-        s1, s2 = st.columns(2)
-        s1.button('◀', key='prev_folder', disabled=(folder_idx == 0),
-                  use_container_width=True, on_click=prev_folder)
-        s2.button('▶', key='next_folder', disabled=(folder_idx == n_folders - 1),
-                  use_container_width=True, on_click=next_folder)
+    # navigation entre devices / sensors
+    st.subheader(f'Device  {folder_idx + 1} / {n_folders}')
+    s1, s2 = st.columns(2)
+    s1.button('◀', key='prev_folder', disabled=(folder_idx == 0),
+              use_container_width=True, on_click=prev_folder)
+    s2.button('▶', key='next_folder', disabled=(folder_idx == n_folders - 1),
+              use_container_width=True, on_click=next_folder)
 
     st.divider()
-    st.subheader('VT_Myriam')
+    st.subheader('Vérité terrain')
     st.button('Occupation', type='primary', use_container_width=True,
               on_click=label, args=(1, current_path))
     st.button('Non-occupation', use_container_width=True,
@@ -194,8 +195,8 @@ with st.sidebar:
 st.markdown(f"## Site `{current_folder['site_id']}`")
 st.markdown(f"`{current_folder['device_id']}` — `sensor_id={current_folder['sensor_id']}`")
 
-vt_label = {1: '✅ Occupation', 0: '❌ Non-occupation'}.get(current_vt_myriam, '—')
-st.markdown(f"**VT_Myriam :** {vt_label}")
+vt_label = {1: '✅ Occupation', 0: '❌ Non-occupation'}.get(current_vt, '—')
+st.markdown(f"**Vérité terrain :** {vt_label}")
 
 # ── graphique ─────────────────────────────────────────────────────────────────
 smp = load_series(current_path)
