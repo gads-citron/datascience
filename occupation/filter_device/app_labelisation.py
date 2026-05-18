@@ -42,8 +42,8 @@ def load_series(path):
     key = path.replace(f's3://{BUCKET}/', '')
     obj = s3.get_object(Bucket=BUCKET, Key=key)
     df = pd.read_parquet(io.BytesIO(obj['Body'].read()))
-    df['payload_expected_time'] = pd.to_datetime(df['payload_expected_time'])
-    df = df.sort_values('payload_expected_time')
+    df['payload_timestamp'] = pd.to_datetime(df['payload_timestamp'])
+    df = df.sort_values('payload_timestamp')
     df['raw_value'] = df['raw_value'].rolling(window=3, center=True, min_periods=1).mean()
     return df
 
