@@ -1,6 +1,7 @@
+import boto3
+from io import BytesIO
 import pandas as pd
 import numpy as np
-from pathlib import Path
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report, confusion_matrix
@@ -9,14 +10,18 @@ import plotly.graph_objects as go
 import mlflow
 
 mlflow.set_tracking_uri("arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN")
+mlflow.set_experiment("Occupation-device-filter")
 
-INPUT_FOLDER = './data/sample_s3/'
-SELECTIONS_CSV = f'./filter_device/occupancy_profile_vt_labels.csv'
+S3_BUCKET  = "gads-citron-sagemaker-custom-stage"
+S3_PREFIX  = "data/occupation/processed/power/"
+SELECTIONS_CSV = "verite_terrain.csv"
 ROLLING = 3
-N_WEEKS = 4
-N_HOURS = N_WEEKS * 7 * 24 # 672 points
-FFT_IDX_DAY = N_WEEKS * 7  # 28 → 1 cycle/jour sur 672h
-FFT_COMPONENTS = N_WEEKS * 30  # 120
+N_WEEKS = 3
+N_HOURS = N_WEEKS * 7 * 24  # 504 points (échantillons de 3 semaines)
+FFT_IDX_DAY = N_WEEKS * 7   # 21 → 1 cycle/jour sur 504h
+FFT_COMPONENTS = N_WEEKS * 30  # 90
+
+_s3 = boto3.client('s3')
 DAILY_POWER_THRESH = 0.01
 RDM = 42 # seed
 
@@ -27,7 +32,6 @@ def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=N
         y_pred = model.predict(X_test)
     method = type(model).__name__ if model else "naive"
     report = classification_report(y_test, y_pred, target_names=['Non-occupation', 'Occupation'])
-    mlflow.set_experiment("Occupation-device-filter")
     with mlflow.start_run(run_name=run_name):
         if note:
             mlflow.set_tag("mlflow.note.content", note)
@@ -55,7 +59,7 @@ def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=N
             template='simple_white', height=350,
             margin=dict(t=50, b=50, l=100, r=20),
         )
-        mlflow.log_figure(fig, "confusion_matrix.png")
+        mlflow.log_figure(fig, "confusion_matrix.html")
         if extra_figures:
             for filename, fig_extra in extra_figures.items():
                 mlflow.log_figure(fig_extra, filename)
@@ -84,29 +88,52 @@ def make_filter_figure(power_daily, power_subdaily, y_pred, threshold):
     )
     return fig
 
-def load_parquet_files(folder):
+def _s3_prefix(*parts):
+    """Construit le prefix S3 en joignant S3_PREFIX et les parties non-vides (sans double-slash)."""
+    return "/".join(p.strip('/') for p in [S3_PREFIX, *parts] if p)
+
+def load_parquet_files():
+    """Liste tous les fichiers parquet dans S3 (structure site/device[/sensor]/date.parquet)."""
+    prefix = _s3_prefix() + "/"
+    paginator = _s3.get_paginator('list_objects_v2')
     files = []
-    for path in sorted(Path(folder).rglob('*.parquet')):
-        parts = {p.split('=')[0]: p.split('=')[1] for p in path.parts if '=' in p}
-        if 'device_id' in parts:
-            files.append({
-                'site_id':   parts.get('site_id', ''),
-                'device_id': parts.get('device_id', ''),
-                'sensor_id': parts.get('sensor_id', ''),
-                'path':      str(path),
-            })
+    for page in paginator.paginate(Bucket=S3_BUCKET, Prefix=prefix):
+        for obj in page.get('Contents', []):
+            key = obj['Key']
+            if not key.endswith('.parquet'):
+                continue
+            rel = key[len(prefix):]
+            parts = rel.split('/')
+            # site/device/sensor/date.parquet  OU  site/device/date.parquet
+            if len(parts) == 4:
+                files.append({'site_id': parts[0], 'device_id': parts[1],
+                              'sensor_id': parts[2], 'path': key})
+            elif len(parts) == 3:
+                files.append({'site_id': parts[0], 'device_id': parts[1],
+                              'sensor_id': '', 'path': key})
     return pd.DataFrame(files)
 
-def compute_raw_series(path):
+def get_parquet_path(site_id, device_id, sensor_id):
+    """Retourne la clé S3 du fichier parquet le plus récent pour un device/sensor donné."""
+    prefix = _s3_prefix(str(site_id), str(device_id), str(sensor_id) if sensor_id else '') + "/"
+    resp = _s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
+    keys = sorted(obj['Key'] for obj in resp.get('Contents', []) if obj['Key'].endswith('.parquet'))
+    return keys[-1] if keys else None  # le plus récent (tri lexicographique sur le nom de date)
+
+def compute_raw_series(s3_key):
     """Série horaire lissée (ROLLING), premiers N_HOURS points, interpolée si lacunes."""
-    df = pd.read_parquet(path)
+    buf = BytesIO()
+    _s3.download_fileobj(S3_BUCKET, s3_key, buf)
+    buf.seek(0)
+    df = pd.read_parquet(buf)
     df['payload_expected_time'] = pd.to_datetime(df['payload_expected_time'])
     df = df.sort_values('payload_expected_time').set_index('payload_expected_time')
     df['raw_value'] = df['raw_value'].rolling(window=ROLLING, center=True, min_periods=1).mean()
     hourly = df['raw_value'].resample('1h').mean()
     hourly = hourly.iloc[:N_HOURS].interpolate(method='time').fillna(0)
     if len(hourly) < N_HOURS:
-        hourly = hourly.reindex(range(N_HOURS), fill_value=0)
+        full_index = pd.date_range(hourly.index[0], periods=N_HOURS, freq='1h')
+        hourly = hourly.reindex(full_index, fill_value=0)
     return hourly.values[:N_HOURS]
 
 def compute_fft_features(series):
@@ -115,15 +142,11 @@ def compute_fft_features(series):
     total_power = mag[1:].sum() + 1e-8
     return mag[1:FFT_COMPONENTS + 1] / total_power
 
-def get_parquet_path(folder, site_id, device_id, sensor_id):
-    pattern = f"site_id={site_id}/device_id={device_id}"
-    if sensor_id:
-        pattern += f"/sensor_id={sensor_id}"
-    paths = list(Path(folder).glob(f"{pattern}/**/*.parquet")) or list(Path(folder).glob(f"{pattern}/*.parquet"))
-    return str(paths[0]) if paths else None
-
 #%% Chargement de la vérité terrain
-files_df = pd.read_csv(SELECTIONS_CSV)
+_csv_buf = BytesIO()
+_s3.download_fileobj(S3_BUCKET, _s3_prefix(SELECTIONS_CSV), _csv_buf)
+_csv_buf.seek(0)
+files_df = pd.read_csv(_csv_buf)
 if 'sensor_id' not in files_df.columns:
     files_df['sensor_id'] = ''
 files_df['sensor_id'] = files_df['sensor_id'].fillna('')
@@ -134,8 +157,12 @@ files_df = (files_df
 )
 files_df['verite_terrain'] = files_df['verite_terrain'].astype(int)
 files_df['path'] = files_df.apply(
-    lambda r: get_parquet_path(INPUT_FOLDER, r['site_id'], r['device_id'], r['sensor_id']), axis=1
+    lambda r: get_parquet_path(r['site_id'], r['device_id'], r['sensor_id']), axis=1
 )
+missing = files_df['path'].isna().sum()
+if missing:
+    print(f'AVERTISSEMENT : {missing} device(s) sans fichier parquet dans S3 — ignorés')
+    files_df = files_df.dropna(subset=['path'])
 files_df = files_df.reset_index(drop=True)
 
 #%% Build feature matrix with fourier transform 
@@ -186,7 +213,7 @@ log_classifier_run(
     run_name="Baseline_filtre_journuit",
     note="Méthode naïve : valid_mask=True → occupation, False → non-occupation.",
     y_pred=y_pred_naive,
-    extra_figures={"filter_journuit.png": fig_filter},
+    extra_figures={"filter_journuit.html": fig_filter},
     dataset_tags=dataset_tags,
 )
 
