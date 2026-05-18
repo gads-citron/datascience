@@ -10,11 +10,12 @@ from botocore.exceptions import ClientError
 BUCKET  = "gads-citron-sagemaker-custom-stage"
 PREFIX  = "data/occupation/processed/power/"
 CSV_KEY = f"{PREFIX}verite_terrain.csv"
+x_time = "payload_timestamp"
+y_value = "occupancy_value"
 
 st.set_page_config(page_title='Labelling occupation', layout='wide')
 
 s3 = boto3.client('s3')
-
 
 @st.cache_data(show_spinner='Scan des fichiers…')
 def load_parquet_files():
@@ -36,17 +37,15 @@ def load_parquet_files():
                 })
     return pd.DataFrame(files)
 
-
 @st.cache_data(show_spinner='Chargement série…')
 def load_series(path):
     key = path.replace(f's3://{BUCKET}/', '')
     obj = s3.get_object(Bucket=BUCKET, Key=key)
     df = pd.read_parquet(io.BytesIO(obj['Body'].read()))
-    df['payload_timestamp'] = pd.to_datetime(df['payload_timestamp'])
-    df = df.sort_values('payload_timestamp')
-    df['raw_value'] = df['raw_value'].rolling(window=3, center=True, min_periods=1).mean()
+    df[x_time] = pd.to_datetime(df[x_time])
+    df = df.sort_values(x_time)
+    df[y_value] = df[y_value].rolling(window=3, center=True, min_periods=1).mean()
     return df
-
 
 # ── données ──────────────────────────────────────────────────────────────────
 all_files  = load_parquet_files()
@@ -58,7 +57,6 @@ n_folders  = len(folders_df)
 # devices = pour le suivi du labelling
 devices_df = all_files[['site_id', 'device_id']].drop_duplicates().reset_index(drop=True)
 n_devices  = len(devices_df)
-
 
 def _load_selections():
     try:
@@ -204,7 +202,7 @@ smp = load_series(current_path)
 fig = go.Figure()
 if not smp.empty:
     fig.add_trace(go.Scatter(
-        x=smp['payload_expected_time'], y=smp['raw_value'],
+        x=smp[x_time], y=smp[y_value],
         mode='lines', line={'color': col.orange, 'width': 1}, name='raw_value'))
 
 fig.update_layout(
@@ -225,10 +223,10 @@ st.plotly_chart(fig, use_container_width=True)
 
 # ── profil moyen (heure × jour de semaine) ───────────────────────────────────
 if not smp.empty:
-    smp['hour']    = smp['payload_expected_time'].dt.hour
-    smp['weekday'] = smp['payload_expected_time'].dt.weekday  # 0=lundi … 6=dimanche
+    smp['hour']    = smp[x_time].dt.hour
+    smp['weekday'] = smp[x_time].dt.weekday  # 0=lundi … 6=dimanche
 
-    pivot = smp.groupby(['weekday', 'hour'])['raw_value'].mean().unstack(level='hour')
+    pivot = smp.groupby(['weekday', 'hour'])[y_value].mean().unstack(level='hour')
     pivot.index = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
 
     fig2 = go.Figure(go.Heatmap(
