@@ -113,12 +113,13 @@ def load_parquet_files():
                               'sensor_id': '', 'path': key})
     return pd.DataFrame(files)
 
-def get_parquet_path(site_id, device_id, sensor_id):
-    """Retourne la clé S3 du fichier parquet le plus récent pour un device/sensor donné."""
-    prefix = _s3_prefix(str(site_id), str(device_id), str(sensor_id) if sensor_id else '') + "/"
-    resp = _s3.list_objects_v2(Bucket=S3_BUCKET, Prefix=prefix)
-    keys = sorted(obj['Key'] for obj in resp.get('Contents', []) if obj['Key'].endswith('.parquet'))
-    return keys[-1] if keys else None  # le plus récent (tri lexicographique sur le nom de date)
+def get_parquet_path(site_id, device_id, sensor_id, parquet_file):
+    """Construit la clé S3 du fichier parquet labelisé (colonne parquet_file du CSV)."""
+    segments = [f"site_id={site_id}", f"device_id={device_id}"]
+    if sensor_id:
+        segments.append(f"sensor_id={sensor_id}")
+    segments.append(f"{parquet_file}.parquet")
+    return _s3_prefix(*segments)
 
 def compute_raw_series(s3_key):
     """Série horaire lissée (ROLLING), premiers N_HOURS points, interpolée si lacunes."""
@@ -152,17 +153,13 @@ if 'sensor_id' not in files_df.columns:
 files_df['sensor_id'] = files_df['sensor_id'].fillna('')
 files_df = (files_df
     .drop_duplicates(subset=['site_id', 'device_id', 'sensor_id'], keep='last')
-    .dropna(subset=['verite_terrain'])
+    .dropna(subset=['verite_terrain', 'parquet_file'])
     .copy()
 )
 files_df['verite_terrain'] = files_df['verite_terrain'].astype(int)
 files_df['path'] = files_df.apply(
-    lambda r: get_parquet_path(r['site_id'], r['device_id'], r['sensor_id']), axis=1
+    lambda r: get_parquet_path(r['site_id'], r['device_id'], r['sensor_id'], r['parquet_file']), axis=1
 )
-missing = files_df['path'].isna().sum()
-if missing:
-    print(f'AVERTISSEMENT : {missing} device(s) sans fichier parquet dans S3 — ignorés')
-    files_df = files_df.dropna(subset=['path'])
 files_df = files_df.reset_index(drop=True)
 
 #%% Build feature matrix with fourier transform 
