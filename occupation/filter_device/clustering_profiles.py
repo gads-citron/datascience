@@ -67,7 +67,7 @@ def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=N
             for filename, fig_extra in extra_figures.items():
                 mlflow.log_figure(fig_extra, filename)
         if model:
-            mlflow.sklearn.log_model(model, artifact_path="model")
+            mlflow.sklearn.log_model(model, artifact_path="model", input_example=X_train[:5])
     return y_pred
 
 def make_filter_figure(power_daily, power_subdaily, y_pred, threshold):
