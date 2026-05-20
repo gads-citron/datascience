@@ -27,7 +27,7 @@ DAILY_POWER_THRESH = 0.01
 RDM = 42 # seed
 
 #%% fonctions
-def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=None, y_pred=None, extra_figures=None, dataset_tags=None):
+def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=None, y_pred=None, extra_figures=None, dataset_tags=None, test_meta=None):
     if y_pred is None:
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
@@ -68,6 +68,11 @@ def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=N
                 mlflow.log_figure(fig_extra, filename)
         if model:
             mlflow.sklearn.log_model(model, artifact_path="model", input_example=X_train[:5])
+        if test_meta is not None:
+            pred_df = test_meta.reset_index(drop=True).copy()
+            pred_df['verite_terrain'] = y_test
+            pred_df['prediction'] = y_pred
+            mlflow.log_text(pred_df.to_csv(index=False), "predictions.csv")
     return y_pred
 
 def make_filter_figure(power_daily, power_subdaily, y_pred, threshold):
@@ -209,6 +214,8 @@ power_daily_test = X_test[:, FFT_IDX_DAY - 1]
 power_subdaily_test = X_test[:, FFT_IDX_DAY:].max(axis=1)
 y_pred_naive = ((power_daily_test > DAILY_POWER_THRESH) & (power_daily_test > power_subdaily_test)).astype(int)
 fig_filter = make_filter_figure(power_daily_test, power_subdaily_test, y_pred_naive, DAILY_POWER_THRESH)
+_test_meta = files_df.iloc[idx_test][['site_id', 'device_id', 'sensor_id', 'parquet_file']].reset_index(drop=True)
+
 log_classifier_run(
     model=None, X_train=None, y_train=None, X_test=None, y_test=y_test,
     run_name="Baseline_filtre_journuit_2005",
@@ -216,6 +223,7 @@ log_classifier_run(
     y_pred=y_pred_naive,
     extra_figures={"filter_journuit.html": fig_filter},
     dataset_tags=dataset_tags,
+    test_meta=_test_meta,
 )
 
 #%% Linear Discriminant Analysis
@@ -226,6 +234,7 @@ y_pred_lda = log_classifier_run(
     note="Test sur échantillon de données labelisées en local avec "
          "une séparation stratifiée 70/30 pour les ensembles d'entraînement et de test.",
     dataset_tags=dataset_tags,
+    test_meta=_test_meta,
 )
 
 #%% SVM — grille de paramètres pour améliorer la précision sur les non-occupations
@@ -248,6 +257,7 @@ for params in svm_variants:
         run_name=run_name,
         note=f"Recherche précision non-occupation — kernel={params.get('kernel')} C={params.get('C')} class_weight={params.get('class_weight')}",
         dataset_tags=dataset_tags,
+        test_meta=_test_meta,
     )
 
 # pred_df = files_df.iloc[idx_test][['site_id', 'device_id', 'sensor_id']].copy().reset_index(drop=True)
