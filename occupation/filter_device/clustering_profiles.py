@@ -162,9 +162,6 @@ files_df['path'] = files_df.apply(
     lambda r: get_parquet_path(r['site_id'], r['device_id'], r['sensor_id'], r['parquet_file']), axis=1
 )
 files_df = files_df.reset_index(drop=True)
-print("Exemple de clé S3 construite :", files_df['path'].iloc[0] if len(files_df) else "DataFrame vide")
-print("Colonnes CSV :", files_df.columns.tolist())
-print(files_df[['site_id', 'device_id', 'sensor_id', 'parquet_file', 'path']].head(3).to_string())
 
 #%% Build feature matrix with fourier transform 
 raw_series = []
