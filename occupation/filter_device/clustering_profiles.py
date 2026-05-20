@@ -200,40 +200,50 @@ dataset_tags = {
 }
 
 #%% Baseline : filtre naïf sur le marquage de la variation jour/nuit et l'existence d'un cycle 24h dominant ───────────────
-power_daily_test = X_test[:, FFT_IDX_DAY - 1]
-power_subdaily_test = X_test[:, FFT_IDX_DAY:].max(axis=1)
-y_pred_naive = ((power_daily_test > DAILY_POWER_THRESH) & (power_daily_test > power_subdaily_test)).astype(int)
-
-fig_filter = make_filter_figure(power_daily_test, power_subdaily_test, y_pred_naive, DAILY_POWER_THRESH)
-
-log_classifier_run(
-    model=None, X_train=None, y_train=None, X_test=None, y_test=y_test,
-    run_name="Baseline_filtre_journuit",
-    note="Méthode naïve : valid_mask=True → occupation, False → non-occupation.",
-    y_pred=y_pred_naive,
-    extra_figures={"filter_journuit.html": fig_filter},
-    dataset_tags=dataset_tags,
-)
+# power_daily_test = X_test[:, FFT_IDX_DAY - 1]
+# power_subdaily_test = X_test[:, FFT_IDX_DAY:].max(axis=1)
+# y_pred_naive = ((power_daily_test > DAILY_POWER_THRESH) & (power_daily_test > power_subdaily_test)).astype(int)
+# fig_filter = make_filter_figure(power_daily_test, power_subdaily_test, y_pred_naive, DAILY_POWER_THRESH)
+# log_classifier_run(
+#     model=None, X_train=None, y_train=None, X_test=None, y_test=y_test,
+#     run_name="Baseline_filtre_journuit",
+#     note="Méthode naïve : valid_mask=True → occupation, False → non-occupation.",
+#     y_pred=y_pred_naive,
+#     extra_figures={"filter_journuit.html": fig_filter},
+#     dataset_tags=dataset_tags,
+# )
 
 #%% Linear Discriminant Analysis
-lda_clf = LinearDiscriminantAnalysis(solver='lsqr', priors=[0.5, 0.5])
-y_pred_lda = log_classifier_run(
-    lda_clf, X_train, y_train, X_test, y_test,
-    run_name="LDA_Sample_labeled_1305",
-    note="Test sur échantillon de données labelisées en local avec "
-         "une séparation stratifiée 70/30 pour les ensembles d'entraînement et de test.",
-    dataset_tags=dataset_tags,
-)
+# lda_clf = LinearDiscriminantAnalysis(solver='lsqr', priors=[0.5, 0.5])
+# y_pred_lda = log_classifier_run(
+#     lda_clf, X_train, y_train, X_test, y_test,
+#     run_name="LDA_Sample_labeled_1305",
+#     note="Test sur échantillon de données labelisées en local avec "
+#          "une séparation stratifiée 70/30 pour les ensembles d'entraînement et de test.",
+#     dataset_tags=dataset_tags,
+# )
 
-#%% SVM à noyau RBF
-svm_clf = SVC(kernel='rbf', class_weight='balanced', random_state=RDM)
-y_pred_svm = log_classifier_run(
-    svm_clf, X_train, y_train, X_test, y_test,
-    run_name="SVM-RBF_Sample_labeled_1305",
-    note="Test sur échantillon de données labelisées en local avec "
-         "une séparation stratifiée 70/30 pour les ensembles d'entraînement et de test.",
-    dataset_tags=dataset_tags,
-)
+#%% SVM — grille de paramètres pour améliorer la précision sur les non-occupations
+svm_variants = [
+    dict(kernel='rbf',    C=1,    class_weight='balanced',   run_name="SVM-RBF_balanced"),
+    dict(kernel='rbf',    C=1,    class_weight={0: 2, 1: 1}, run_name="SVM-RBF_w2-1"),
+    dict(kernel='rbf',    C=1,    class_weight={0: 3, 1: 1}, run_name="SVM-RBF_w3-1"),
+    dict(kernel='rbf',    C=1,    class_weight={0: 5, 1: 1}, run_name="SVM-RBF_w5-1"),
+    dict(kernel='rbf',    C=0.1,  class_weight='balanced',   run_name="SVM-RBF_C0.1_balanced"),
+    dict(kernel='rbf',    C=0.1,  class_weight={0: 2, 1: 1}, run_name="SVM-RBF_C0.1_w2-1"),
+    dict(kernel='linear', C=1,    class_weight='balanced',   run_name="SVM-Linear_balanced"),
+    dict(kernel='linear', C=1,    class_weight={0: 2, 1: 1}, run_name="SVM-Linear_w2-1"),
+]
+
+for params in svm_variants:
+    run_name = params.pop('run_name')
+    clf = SVC(random_state=RDM, **params)
+    log_classifier_run(
+        clf, X_train, y_train, X_test, y_test,
+        run_name=run_name,
+        note=f"Recherche précision non-occupation — kernel={params.get('kernel')} C={params.get('C')} class_weight={params.get('class_weight')}",
+        dataset_tags=dataset_tags,
+    )
 
 # pred_df = files_df.iloc[idx_test][['site_id', 'device_id', 'sensor_id']].copy().reset_index(drop=True)
 # pred_df['verite_terrain'] = y_test
