@@ -8,6 +8,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.svm import SVC
 import plotly.graph_objects as go
 import mlflow
+import mlflow.sklearn
 
 mlflow.set_tracking_uri("arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN")
 mlflow.set_experiment("Occupation-device-filter")
@@ -46,6 +47,8 @@ def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=N
                 for metric_name, value in metrics.items():
                     mlflow.log_metric(f"{label}_{metric_name}", value)
         cm = confusion_matrix(y_test, y_pred)
+        tn, fp, fn, tp = cm.ravel()
+        mlflow.log_metrics({"cm_TN": int(tn), "cm_FP": int(fp), "cm_FN": int(fn), "cm_TP": int(tp)})
         fig = go.Figure(go.Heatmap(
             z=cm,
             x=['Prédit Non-occ', 'Prédit Occ'],
@@ -63,6 +66,8 @@ def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=N
         if extra_figures:
             for filename, fig_extra in extra_figures.items():
                 mlflow.log_figure(fig_extra, filename)
+        if model:
+            mlflow.sklearn.log_model(model, artifact_path="model")
     return y_pred
 
 def make_filter_figure(power_daily, power_subdaily, y_pred, threshold):
@@ -200,28 +205,28 @@ dataset_tags = {
 }
 
 #%% Baseline : filtre naïf sur le marquage de la variation jour/nuit et l'existence d'un cycle 24h dominant ───────────────
-# power_daily_test = X_test[:, FFT_IDX_DAY - 1]
-# power_subdaily_test = X_test[:, FFT_IDX_DAY:].max(axis=1)
-# y_pred_naive = ((power_daily_test > DAILY_POWER_THRESH) & (power_daily_test > power_subdaily_test)).astype(int)
-# fig_filter = make_filter_figure(power_daily_test, power_subdaily_test, y_pred_naive, DAILY_POWER_THRESH)
-# log_classifier_run(
-#     model=None, X_train=None, y_train=None, X_test=None, y_test=y_test,
-#     run_name="Baseline_filtre_journuit",
-#     note="Méthode naïve : valid_mask=True → occupation, False → non-occupation.",
-#     y_pred=y_pred_naive,
-#     extra_figures={"filter_journuit.html": fig_filter},
-#     dataset_tags=dataset_tags,
-# )
+power_daily_test = X_test[:, FFT_IDX_DAY - 1]
+power_subdaily_test = X_test[:, FFT_IDX_DAY:].max(axis=1)
+y_pred_naive = ((power_daily_test > DAILY_POWER_THRESH) & (power_daily_test > power_subdaily_test)).astype(int)
+fig_filter = make_filter_figure(power_daily_test, power_subdaily_test, y_pred_naive, DAILY_POWER_THRESH)
+log_classifier_run(
+    model=None, X_train=None, y_train=None, X_test=None, y_test=y_test,
+    run_name="Baseline_filtre_journuit_2005",
+    note="Méthode naïve : valid_mask=True → occupation, False → non-occupation.",
+    y_pred=y_pred_naive,
+    extra_figures={"filter_journuit.html": fig_filter},
+    dataset_tags=dataset_tags,
+)
 
 #%% Linear Discriminant Analysis
-# lda_clf = LinearDiscriminantAnalysis(solver='lsqr', priors=[0.5, 0.5])
-# y_pred_lda = log_classifier_run(
-#     lda_clf, X_train, y_train, X_test, y_test,
-#     run_name="LDA_Sample_labeled_1305",
-#     note="Test sur échantillon de données labelisées en local avec "
-#          "une séparation stratifiée 70/30 pour les ensembles d'entraînement et de test.",
-#     dataset_tags=dataset_tags,
-# )
+lda_clf = LinearDiscriminantAnalysis(solver='lsqr', priors=[0.5, 0.5])
+y_pred_lda = log_classifier_run(
+    lda_clf, X_train, y_train, X_test, y_test,
+    run_name="LDA_Sample_labeled_2005",
+    note="Test sur échantillon de données labelisées en local avec "
+         "une séparation stratifiée 70/30 pour les ensembles d'entraînement et de test.",
+    dataset_tags=dataset_tags,
+)
 
 #%% SVM — grille de paramètres pour améliorer la précision sur les non-occupations
 svm_variants = [
