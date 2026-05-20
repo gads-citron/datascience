@@ -129,8 +129,8 @@ def compute_raw_series(s3_key):
     df = pd.read_parquet(buf)
     df['payload_timestamp'] = pd.to_datetime(df['payload_timestamp'])
     df = df.sort_values('payload_timestamp').set_index('payload_timestamp')
-    df['raw_value'] = df['raw_value'].rolling(window=ROLLING, center=True, min_periods=1).mean()
-    hourly = df['raw_value'].resample('1h').mean()
+    df['occupancy_value'] = df['occupancy_value'].rolling(window=ROLLING, center=True, min_periods=1).mean()
+    hourly = df['occupancy_value'].resample('1h').mean()
     hourly = hourly.iloc[:N_HOURS].interpolate(method='time').fillna(0)
     if len(hourly) < N_HOURS:
         full_index = pd.date_range(hourly.index[0], periods=N_HOURS, freq='1h')
