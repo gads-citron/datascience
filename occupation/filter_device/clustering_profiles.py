@@ -31,7 +31,7 @@ def log_classifier_run(model, X_train, y_train, X_test, y_test, run_name, note=N
         model.fit(X_train, y_train)
         y_pred = model.predict(X_test)
     method = type(model).__name__ if model else "naive"
-    report = classification_report(y_test, y_pred, target_names=['Non-occupation', 'Occupation'])
+    report = classification_report(y_test, y_pred, target_names=['Non-occupation', 'Occupation'], output_dict=True)
     with mlflow.start_run(run_name=run_name):
         if note:
             mlflow.set_tag("mlflow.note.content", note)
