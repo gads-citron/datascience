@@ -1,12 +1,12 @@
 from dotenv import load_dotenv
 import urllib.parse
 from io import BytesIO
+import json
 import pandas as pd
 import os
 import clickhouse_connect
 import boto3
 import datetime as dt
-import clickhouse_connect
 import numpy as np
 import mlflow
 import mlflow.sklearn
@@ -55,7 +55,7 @@ def write_to_db(s_occ, r, y_col, datat, db):
     s_occ['model_version'] = p.model_version
     s_occ['valueType'] = datat
     s_occ['ingested_at'] = dt.datetime.now()
-    db.insert_df(p.dataout, occ)
+    db.insert_df(p.dataout, s_occ)
 
 def _s3_prefix(*parts):
     """Construit le prefix S3 en joignant S3_PREFIX et les parties non-vides (sans double-slash)."""
