@@ -12,7 +12,7 @@ BASE_DESCRIPTION = (
     "Les anomalies sont détectées avec la méthode {method} (params : {params}) "
     "sur des périodes glissantes de {window} semaines."
 )
-WINDOW = 8
+WINDOW = 12
 
 configs = [
     {"method": "iso_forest", "param": {"th": -0.6}},
@@ -24,6 +24,9 @@ configs = [
     {"method": "stl",        "param": {"k": 1.5}},
     {"method": "stl",        "param": {"k": 3}},
     {"method": "stl",        "param": {"k": 10}},
+    {"method": "arima",      "param": {"p": 6, "d": 1, "q": 1}},
+    {"method": "arima",      "param": {"p": 12, "d": 1, "q": 2}},
+    {"method": "arima",      "param": {"p": 24, "d": 1, "q": 1}},
 ]
 
 def run_cfg(cfg):
@@ -40,5 +43,4 @@ def run_cfg(cfg):
         anom_dir=ANOM_DIR,
         description=description,
     )
-
 Parallel(n_jobs=3, backend="loky")(delayed(run_cfg)(cfg) for cfg in configs)
