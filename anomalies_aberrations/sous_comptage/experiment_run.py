@@ -101,6 +101,7 @@ def run(method, window, param, anom_dir, description=""):
         mlflow.set_tag("mlflow.note.content", description)
         mlflow.sklearn.autolog()
         mlflow.log_param("method", method)
+        mlflow.log_param("window", window)
         mlflow.log_param("param", param)
         mlflow.log_metric("precision", precision_score(merged['VT_myriam'], merged['anomaly']))
         mlflow.log_metric("recall", recall_score(merged['VT_myriam'], merged['anomaly']))

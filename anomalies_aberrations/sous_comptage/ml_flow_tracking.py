@@ -12,7 +12,7 @@ BASE_DESCRIPTION = (
     "Les anomalies sont détectées avec la méthode {method} (params : {params}) "
     "sur des périodes glissantes de {window} semaines."
 )
-WINDOW = 4
+WINDOW = 8
 
 configs = [
     {"method": "iso_forest", "param": {"th": -0.6}},
