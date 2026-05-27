@@ -49,26 +49,42 @@ def load_all_parquets(folder: str, site_ids: list) -> pd.DataFrame:
     files = [f for s in site_ids for f in glob.glob(str(base / f"site_id={s}" / "**" / "*.parquet"), recursive=True)]
     return duckdb.sql(f"SELECT * FROM read_parquet({[str(f) for f in files]})").df()
 
-def classify_data(smp, method, w, param):
+def classify_data(smp, method, w, param, window_type="tumbling"):
     """ avec un jeu de données """
     detector = Detector(method, param)
     smp['raw_value'] = smp.raw_value.interpolate()
-    anomalies = []
     smp = smp.sort_values('payload_expected_time')
     delta = pd.Timedelta(weeks=w)
-    current = smp['payload_expected_time'].min()
-    end_time = smp['payload_expected_time'].max()
-    while current < end_time:
-        mask_window = (smp['payload_expected_time'] >= current) & (smp['payload_expected_time'] < current + delta)
-        window = smp.loc[mask_window].copy()
-        if not window.empty:
-            detector.predict(window, "raw_value")
-            mask = window['anomaly'] == 1
-            anomalies.append(window.loc[mask])
-        current += delta
+    anomalies = []
+
+    if window_type == "centered":
+        half_delta = delta / 2
+        for _, row in smp.iterrows():
+            t = row['payload_expected_time']
+            mask_window = (smp['payload_expected_time'] >= t - half_delta) & \
+                          (smp['payload_expected_time'] <= t + half_delta)
+            ctx = smp.loc[mask_window].copy()
+            if ctx.empty:
+                continue
+            detector.predict(ctx, "raw_value")
+            center = ctx.loc[ctx['payload_expected_time'] == t]
+            if not center.empty and center['anomaly'].iloc[0] == 1:
+                anomalies.append(center)
+    else:
+        current = smp['payload_expected_time'].min()
+        end_time = smp['payload_expected_time'].max()
+        while current < end_time:
+            mask_window = (smp['payload_expected_time'] >= current) & (smp['payload_expected_time'] < current + delta)
+            window = smp.loc[mask_window].copy()
+            if not window.empty:
+                detector.predict(window, "raw_value")
+                mask = window['anomaly'] == 1
+                anomalies.append(window.loc[mask])
+            current += delta
+
     return pd.concat(anomalies, ignore_index=True) if anomalies else pd.DataFrame()
 
-def run(method, window, param, anom_dir, description=""):
+def run(method, window, param, anom_dir, description="", window_type="tumbling"):
     if _is_s3(anom_dir):
         parts = anom_dir.replace("s3://", "", 1).split("/", 1)
         bucket, prefix = parts[0], parts[1].rstrip("/")
@@ -83,7 +99,7 @@ def run(method, window, param, anom_dir, description=""):
     groups = list(df.groupby(['site_id', 'device_id', 'sensor_id']))
     with tqdm_joblib(tqdm(total=len(groups), desc="Classification")):
         results = Parallel(n_jobs=-1)(
-            delayed(classify_data)(g, method, window, param)
+            delayed(classify_data)(g, method, window, param, window_type)
             for _, g in groups
         )
     anom_df = pd.concat([r for r in results if not r.empty], ignore_index=True)
@@ -102,6 +118,7 @@ def run(method, window, param, anom_dir, description=""):
         mlflow.sklearn.autolog()
         mlflow.log_param("method", method)
         mlflow.log_param("window", window)
+        mlflow.log_param("window_type", window_type)
         mlflow.log_param("param", param)
         mlflow.log_metric("precision", precision_score(merged['VT_myriam'], merged['anomaly']))
         mlflow.log_metric("recall", recall_score(merged['VT_myriam'], merged['anomaly']))
@@ -129,6 +146,7 @@ if __name__ == "__main__":
     parser.add_argument('--param', type=lambda x: {x.split('=')[0]: float(x.split('=')[1])}, default={}, help="ex: k=5 ou th=2")
     parser.add_argument('--window', type=int, default=4, help="fenêtre en nombre de semaines")
     parser.add_argument('--anom_dir', type=str, required=True)
+    parser.add_argument('--window_type', type=str, default="tumbling", choices=["tumbling", "centered"])
     parser.add_argument('--description', type=str, default="")
     args = parser.parse_args()
-    run(args.method, args.window, args.param, args.anom_dir, args.description)
+    run(args.method, args.window, args.param, args.anom_dir, args.description, args.window_type)
