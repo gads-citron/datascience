@@ -1,5 +1,6 @@
 # streamlit run check_FN_FP.py
 import glob
+import boto3
 import duckdb
 import streamlit as st
 import pandas as pd
@@ -7,26 +8,46 @@ import plotly.graph_objects as go
 from pathlib import Path
 import citron_colors as col
 
-DATA_DIR = './data/sample_anomalies_2025_sem_1'
+CSV_DIR  = 's3://sagemaker-eu-west-3-585762237892/2/893314ffb09f4810a29f8dbdfffae185/artifacts'
+DATA_DIR = 's3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary'
+
+def _is_s3(path):
+    return str(path).startswith('s3://')
+
+def _s3_parts(path):
+    without = str(path).replace('s3://', '', 1)
+    bucket, prefix = without.split('/', 1)
+    return bucket, prefix.rstrip('/')
 
 st.set_page_config(page_title='Revue FP / FN', layout='wide')
 
 @st.cache_data(show_spinner='Chargement parquet…')
 def load_series(site_id, device_id, sensor_id):
-    pattern = str(Path(DATA_DIR) / f"site_id={site_id}" / f"device_id={device_id}" / f"sensor_id={sensor_id}" / "**" / "*.parquet")
-    files = glob.glob(pattern, recursive=True)
-    if not files:
-        return pd.DataFrame()
-    df = duckdb.sql(f"SELECT * FROM read_parquet({[str(f) for f in files]})").df()
+    sub = f"site_id={site_id}/device_id={device_id}/sensor_id={sensor_id}/**/*.parquet"
+    if _is_s3(DATA_DIR):
+        path = f"{DATA_DIR}/{sub}"
+        con = duckdb.connect()
+        con.execute("INSTALL httpfs; LOAD httpfs; CALL load_aws_credentials();")
+        df = con.execute(f"SELECT * FROM read_parquet('{path}')").df()
+    else:
+        files = glob.glob(str(Path(DATA_DIR) / sub), recursive=True)
+        if not files:
+            return pd.DataFrame()
+        df = duckdb.sql(f"SELECT * FROM read_parquet({[str(f) for f in files]})").df()
     df['payload_expected_time'] = pd.to_datetime(df['payload_expected_time'], utc=True).dt.tz_convert(None)
     return df.sort_values('payload_expected_time').reset_index(drop=True)
 
 @st.cache_data
 def load_cases(csv_name):
-    path = Path(DATA_DIR) / csv_name
-    if not path.exists():
-        return pd.DataFrame()
-    df = pd.read_csv(path)
+    if _is_s3(CSV_DIR):
+        bucket, prefix = _s3_parts(CSV_DIR)
+        obj = boto3.client('s3').get_object(Bucket=bucket, Key=f"{prefix}/{csv_name}")
+        df = pd.read_csv(obj['Body'])
+    else:
+        path = Path(CSV_DIR) / csv_name
+        if not path.exists():
+            return pd.DataFrame()
+        df = pd.read_csv(path)
     df['payload_expected_time'] = pd.to_datetime(
         df['payload_expected_time'], format='mixed', utc=True).dt.tz_convert(None)
     return df.reset_index(drop=True)
@@ -40,7 +61,7 @@ csv_name = 'false_positives.csv' if choice == 'Faux Positifs' else 'false_negati
 cases = load_cases(csv_name)
 
 if cases.empty:
-    st.warning(f'{csv_name} introuvable ou vide dans {DATA_DIR}.')
+    st.warning(f'{csv_name} introuvable ou vide dans {CSV_DIR}.')
     st.stop()
 
 n = len(cases)
