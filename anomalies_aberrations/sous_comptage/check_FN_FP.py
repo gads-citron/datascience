@@ -23,17 +23,18 @@ st.set_page_config(page_title='Revue FP / FN', layout='wide')
 
 @st.cache_data(show_spinner='Chargement parquet…')
 def load_series(site_id, device_id, sensor_id):
-    sub = f"site_id={site_id}/device_id={device_id}/sensor_id={sensor_id}/**/*.parquet"
+    sub = f"site_id={site_id}/device_id={device_id}/*.parquet"
     if _is_s3(DATA_DIR):
         path = f"{DATA_DIR}/{sub}"
         con = duckdb.connect()
         con.execute("INSTALL httpfs; LOAD httpfs; CALL load_aws_credentials();")
         df = con.execute(f"SELECT * FROM read_parquet('{path}')").df()
     else:
-        files = glob.glob(str(Path(DATA_DIR) / sub), recursive=True)
+        files = glob.glob(str(Path(DATA_DIR) / sub))
         if not files:
             return pd.DataFrame()
         df = duckdb.sql(f"SELECT * FROM read_parquet({[str(f) for f in files]})").df()
+    df = df[df['sensor_id'] == sensor_id].copy()
     df['payload_expected_time'] = pd.to_datetime(df['payload_expected_time'], utc=True).dt.tz_convert(None)
     return df.sort_values('payload_expected_time').reset_index(drop=True)
 
