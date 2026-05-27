@@ -22,7 +22,7 @@ def _s3_parts(path):
 st.set_page_config(page_title='Revue FP / FN', layout='wide')
 
 @st.cache_data(show_spinner='Chargement parquet…')
-def load_series(site_id, device_id, sensor_id):
+def load_series(site_id, device_id):
     sub = f"site_id={site_id}/device_id={device_id}/*.parquet"
     if _is_s3(DATA_DIR):
         path = f"{DATA_DIR}/{sub}"
@@ -34,12 +34,11 @@ def load_series(site_id, device_id, sensor_id):
         if not files:
             return pd.DataFrame()
         df = duckdb.sql(f"SELECT * FROM read_parquet({[str(f) for f in files]})").df()
-    df = df[df['sensor_id'] == sensor_id].copy()
     df['payload_expected_time'] = pd.to_datetime(df['payload_expected_time'], utc=True).dt.tz_convert(None)
     return df.sort_values('payload_expected_time').reset_index(drop=True)
 
 @st.cache_data
-def load_cases(csv_name):
+def load_cases(csv_name, label):
     if _is_s3(CSV_DIR):
         bucket, prefix = _s3_parts(CSV_DIR)
         obj = boto3.client('s3').get_object(Bucket=bucket, Key=f"{prefix}/{csv_name}")
@@ -49,20 +48,25 @@ def load_cases(csv_name):
         if not path.exists():
             return pd.DataFrame()
         df = pd.read_csv(path)
+    df['_type'] = label
     df['payload_expected_time'] = pd.to_datetime(
         df['payload_expected_time'], format='mixed', utc=True).dt.tz_convert(None)
-    return df.reset_index(drop=True)
+    return df
 
-# ── sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.title('Revue FP / FN')
-    choice = st.radio('Afficher', ['Faux Positifs', 'Faux Négatifs'])
+@st.cache_data
+def load_all_cases():
+    fp = load_cases('false_positives.csv', 'Faux Positif')
+    fn = load_cases('false_negatives.csv', 'Faux Négatif')
+    dfs = [d for d in [fp, fn] if not d.empty]
+    if not dfs:
+        return pd.DataFrame()
+    return pd.concat(dfs, ignore_index=True)
 
-csv_name = 'false_positives.csv' if choice == 'Faux Positifs' else 'false_negatives.csv'
-cases = load_cases(csv_name)
+# ── chargement ────────────────────────────────────────────────────────────────
+cases = load_all_cases()
 
 if cases.empty:
-    st.warning(f'{csv_name} introuvable ou vide dans {CSV_DIR}.')
+    st.warning(f'Aucun fichier false_positives.csv / false_negatives.csv trouvé dans {CSV_DIR}.')
     st.stop()
 
 n = len(cases)
@@ -70,14 +74,11 @@ n = len(cases)
 if 'idx' not in st.session_state:
     st.session_state.idx = 0
 
-# reset l'index quand on change de catégorie
-if st.session_state.get('_choice') != choice:
-    st.session_state.idx = 0
-    st.session_state['_choice'] = choice
-
 idx = min(st.session_state.idx, n - 1)
 
+# ── sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
+    st.title('Revue FP / FN')
     st.divider()
     st.subheader(f'Cas  {idx + 1} / {n}')
     c1, c2 = st.columns(2)
@@ -90,17 +91,17 @@ with st.sidebar:
 # ── cas courant ───────────────────────────────────────────────────────────────
 row        = cases.iloc[idx]
 event_time = row['payload_expected_time']
-label      = '🔴 Faux Positif' if choice == 'Faux Positifs' else '🟠 Faux Négatif'
+is_fp      = row['_type'] == 'Faux Positif'
+label      = '🔴 Faux Positif' if is_fp else '🟠 Faux Négatif'
 
 st.markdown(f'## {label}')
-m1, m2, m3 = st.columns(3)
+m1, m2 = st.columns(2)
 m1.metric('site_id',   str(row['site_id']))
 m2.metric('device_id', str(row['device_id']))
-m3.metric('sensor_id', str(row['sensor_id']))
 st.caption(f"Date : {event_time}")
 
 # ── graphique ─────────────────────────────────────────────────────────────────
-smp = load_series(row['site_id'], row['device_id'], row['sensor_id'])
+smp = load_series(row['site_id'], row['device_id'])
 fig = go.Figure()
 
 if smp.empty:
