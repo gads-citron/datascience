@@ -14,10 +14,13 @@ from anomaly_detector import DataProcessor
 
 #%% S3 destination
 S3_BUCKET = os.environ.get("S3_BUCKET", "gads-citron-sagemaker-custom-stage")
-S3_PREFIX = os.environ.get("S3_PREFIX", "data/anomaly/tertiary/")
+S3_PREFIX = os.environ.get("S3_PREFIX", "data/anomaly/tertiary_IQ/")
 UPLOAD_TO_S3 = os.environ.get("UPLOAD_TO_S3", "1") == "1"
 s3_client = boto3.client("s3") if UPLOAD_TO_S3 else None
 prod_client = ClickHouseClient()
+y_column = 'eval_prev_hour'
+x_time = 'payload_expected_time'
+sensor_idx = '662bc1c93f0afb78ad05983d'# Index consommation électricité (kWh)
 
 def upload_to_s3(local_path, site_id, device_id, file_name):
     """Upload un parquet local vers s3://{S3_BUCKET}/{S3_PREFIX}site_id=.../device_id=.../sensor_id=.../."""
@@ -64,13 +67,13 @@ def main(start, end, period, input_dir, output_dir):
     sous_comptage = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
     x_time = 'payload_expected_time'
 
-    list_anom = pd.read_csv(f'{input_dir}/candidates_anom.csv')
-    candidates = list_anom[['customer_account_name', 'device_name', 'sensor_name']].drop_duplicates()
+    list_anom = pd.read_csv(f'{input_dir}/iq_spot_detection_stl_isof_2026.csv')
+    candidates = list_anom[['customer_account_name', 'device_id', 'sensor_id']].drop_duplicates()
     for i, row in tqdm(candidates.iterrows(), total=candidates.shape[0]):
         record = {
                 "customer_account_name": row.customer_account_name,
-                "device_name": row.device_name,
-                "sensor_name": row.sensor_name,
+                "device_id": row.device_id,
+                "sensor_id": row.sensor_id,
             }
         q = f"""SELECT customer_account_name, site_id, device_id, sensor_id, entity, {x_time}, eval_prev_hour, sum_payload_value_hour_curr,
                         device_name, sensor_name
@@ -78,8 +81,8 @@ def main(start, end, period, input_dir, output_dir):
                 WHERE 1=1
                     AND payload_expected_time between '{start}' and '{end}'
                     AND customer_account_name = '{row.customer_account_name.replace("'", "''")}'
-                    AND device_name = '{row.device_name.replace("'", "''")}'
-                    AND sensor_name  = '{row.sensor_name.replace("'", "''")}'
+                    AND device_id = '{row.device_id}'
+                    AND sensor_id  = '{sensor_idx}'
                     ORDER BY payload_expected_time DESC"""
         smp = prod_client.query(q)
         if smp.empty:
@@ -90,15 +93,18 @@ def main(start, end, period, input_dir, output_dir):
             device_id = smp.device_id.values[0]
             site_id = smp.site_id.values[0]
             smp = smp[smp.entity == smp.entity.value_counts().index[0]]  # dédupliquer la données par client
-            smp = smp[~smp['sum_payload_value_hour_curr'].isna()]
-            checking = DataProcessor(record, smp)
-            if 'index' in row.sensor_name.lower():
-                y_column = 'eval_prev_hour'
-            elif not checking.serie_typology('sum_payload_value_hour_curr', tol=0.3):
-                y_column = 'sum_payload_value_hour_curr'
-            else:
-                y_column = 'eval_prev_hour'
-            record['y_column'] = y_column
+            smp = smp.copy()
+            smp[x_time] = pd.to_datetime(smp[x_time])
+            smp[y_column] = smp[y_column].interpolate()
+            # smp = smp[~smp['sum_payload_value_hour_curr'].isna()]
+            # checking = DataProcessor(record, smp)
+            # if 'index' in row.sensor_name.lower():
+            #     y_column = 'eval_prev_hour'
+            # elif not checking.serie_typology('sum_payload_value_hour_curr', tol=0.3):
+            #     y_column = 'sum_payload_value_hour_curr'
+            # else:
+            #     y_column = 'eval_prev_hour'
+            # record['y_column'] = y_column
             try:
                 export_to_parquet(smp, y_column, site_id, device_id, period, output_dir)
             except Exception as e:
@@ -108,11 +114,11 @@ def main(start, end, period, input_dir, output_dir):
 #%% Collect parameters
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description="Export données ClickHouse vers Parquet/S3")
-    parser.add_argument("--start",      default="2025-01-01 00:00:00", help="Date de début (YYYY-MM-DD HH:MM:SS)")
-    parser.add_argument("--end",        default="2025-06-30 23:59:59", help="Date de fin   (YYYY-MM-DD HH:MM:SS)")
-    parser.add_argument("--period",     default="2025_sem1", help="Nom de la période traitée par les données.")
-    parser.add_argument("--output_dir", default="./data/sample_anomalies_2025_sem_1", dest="output_dir", help="Dossier de sortie local")
-    parser.add_argument("--input_dir",  default="./data/sample_anomalies_2025_sem_1", dest="input_dir", help="Dossier de sortie local")
+    parser.add_argument("--start",      default="2026-01-01 00:00:00", help="Date de début (YYYY-MM-DD HH:MM:SS)")
+    parser.add_argument("--end",        default="2026-06-01 23:59:59", help="Date de fin   (YYYY-MM-DD HH:MM:SS)")
+    parser.add_argument("--period",     default="2026_sem1", help="Nom de la période traitée par les données.")
+    parser.add_argument("--output_dir", default="./data/sample_anomalies_IQ_2026", dest="output_dir", help="Dossier de sortie local")
+    parser.add_argument("--input_dir",  default="./data/sample_anomalies_IQ_2026", dest="input_dir", help="Dossier de sortie local")
     args = parser.parse_args()
     start      = args.start
     end        = args.end

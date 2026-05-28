@@ -6,11 +6,12 @@ import citron_colors as col
 from db_connector import ClickHouseClient
 
 # ── config ────────────────────────────────────────────────────────────────────
-INPUT_FOLDER  = './data/sample_anomalies_2025_sem_1'
-CSV_PATH      = f'{INPUT_FOLDER}/verite_terrain.csv'
+# INPUT_FOLDER  = './data/sample_anomalies_2025_sem_1'
+# CSV_PATH      = f'{INPUT_FOLDER}/verite_terrain.csv'
+CSV_PATH      = f'./data/iq_spot_detection_stl_isof_2026.csv'
 SOUS_COMPTAGE = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
-START         = '2025-01-01 00:00:00'
-END           = '2025-12-31 00:00:00'
+START         = '2026-01-01 00:00:00'
+END           = '2026-12-31 00:00:00'
 
 st.set_page_config(page_title='Validation manuelle des anomalies', layout='wide')
 
@@ -36,6 +37,7 @@ def load_series(device_id, sensor_id):
 # ── session state ─────────────────────────────────────────────────────────────
 if 'anomalies' not in st.session_state:
     df = pd.read_csv(CSV_PATH)
+    df = df[df['isof']==1].reset_index(drop=True)
     if 'VT_myriam' not in df.columns:
         df['VT_myriam'] = pd.NA
     st.session_state.anomalies = df
@@ -49,15 +51,15 @@ def save():
 
 # ── groupes (device_id, sensor_id) ───────────────────────────────────────────
 anomalies = st.session_state.anomalies
-groups    = [(key, grp) for key, grp in anomalies.groupby(['device_id', 'sensor_id'])]
+groups    = [(key, grp) for key, grp in anomalies.groupby(['site_id', 'device_id', 'sensor_id'])]
 n_groups  = len(groups)
 
 g_idx = min(st.session_state.g_idx, n_groups - 1)
-(device_id, sensor_id), grp = groups[g_idx]
+(site_id, device_id, sensor_id), grp = groups[g_idx]
 n_anom = len(grp)
 a_idx  = min(st.session_state.a_idx, n_anom - 1)
 row    = grp.iloc[a_idx]
-y_col  = row['feature']
+y_col  = 'eval_prev_hour'
 
 # ── callbacks ─────────────────────────────────────────────────────────────────
 def prev_group():
@@ -125,9 +127,9 @@ with st.sidebar:
             st.selectbox('feature', ['eval_prev_hour', 'sum_payload_value_hour_curr'],
                          index=0 if y_col == 'eval_prev_hour' else 1, disabled=True)
             f_value   = st.number_input('value', value=0.0)
-            f_iqr     = st.checkbox('iqr')
+            # f_iqr     = st.checkbox('iqr')
             f_isof    = st.checkbox('isof')
-            f_stl     = st.checkbox('stl')
+            # f_stl     = st.checkbox('stl')
             f_vt      = st.selectbox('VT_myriam', ['—', '1', '0'])
 
             if st.form_submit_button('Ajouter', use_container_width=True):
@@ -141,9 +143,9 @@ with st.sidebar:
                     'payload_expected_time': f_ts,
                     'feature':               y_col,
                     'value':                 f_value,
-                    'iqr':                   f_iqr,
+                    # 'iqr':                   f_iqr,
                     'isof':                  f_isof,
-                    'stl':                   f_stl,
+                    # 'stl':                   f_stl,
                     'VT_myriam':             int(f_vt) if f_vt in ('0', '1') else pd.NA,
                 }
                 st.session_state.anomalies = pd.concat(
@@ -159,9 +161,9 @@ st.markdown(f"## {row['customer_account_name']}")
 st.markdown(f"`{row['device_name']}` / `{row['sensor_name']}`")
 
 m1, m2, m3, m4 = st.columns(4)
-m1.metric('IQR',       '✓' if row['iqr']  else '·')
+# m1.metric('IQR',       '✓' if row['iqr']  else '·')
 m2.metric('ISOF',      '✓' if row['isof'] else '·')
-m3.metric('STL',       '✓' if row['stl']  else '·')
+# m3.metric('STL',       '✓' if row['stl']  else '·')
 m4.metric('VT_myriam', vt_disp)
 
 # ── graphique — série chargée une fois par capteur, marker sur l'anomalie courante

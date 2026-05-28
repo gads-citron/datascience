@@ -4,7 +4,7 @@ import experiment_run as exp
 
 ANOM_DIR = os.environ.get(
     "ANOM_DIR",
-    "s3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary"
+    "s3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary_IQ"
 )
 
 BASE_DESCRIPTION = (
