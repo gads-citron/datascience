@@ -4,7 +4,7 @@ from io import BytesIO
 import json
 import pandas as pd
 import os
-import clickhouse_connect
+# import clickhouse_connect
 import boto3
 import datetime as dt
 import numpy as np
@@ -147,6 +147,7 @@ if LOCAL_TEST:
         if os.path.isdir(os.path.join(LOCAL_DATA_DIR, d)) and d.startswith('site_id=')
     ]
 else:
+    mlflow.set_tracking_uri("arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN")
     experiment = mlflow.get_experiment_by_name("Occupation-device-filter")
     runs = mlflow.search_runs(
         experiment_ids=[experiment.experiment_id],
