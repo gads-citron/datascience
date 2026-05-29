@@ -4,7 +4,7 @@ from io import BytesIO
 import json
 import pandas as pd
 import os
-# import clickhouse_connect
+import clickhouse_connect
 import boto3
 import datetime as dt
 import numpy as np
@@ -117,8 +117,6 @@ def compute_fft_features(series):
     return mag[1:FFT_COMPONENTS + 1] / total_power
 
 #%% DtB connect
-# prod_client = db_connect(type='prod', envir=p.envir)
-# stage_client = db_connect(type='stage', envir=p.envir)
 
 #
 LOCAL_TEST     = False
@@ -161,6 +159,21 @@ else:
         cp['Prefix'] for cp in response.get('CommonPrefixes', [])
         if cp['Prefix'].rstrip('/').split('/')[-1].startswith('site_id=')
     ]
+# Récupération des customer_account_name depuis ClickHouse prod
+site_ids = [p.rstrip('/').split('/')[-1].split('=', 1)[-1] for p in site_prefixes]
+envir = 'local' if LOCAL_TEST else 'sagemaker'
+prod_client  = db_connect(type='prod',  envir=envir)
+stage_client = db_connect(type='stage', envir=envir)
+site_id_list = ', '.join(f"'{s}'" for s in site_ids)
+account_df = prod_client.query_df(f"""
+    SELECT site_id, site_name, customer_account_name
+    FROM datamart_sous_comptage.distributed_dataset_hourly_payloads_merged
+    WHERE site_id IN ({site_id_list})
+    GROUP BY site_id, site_name, customer_account_name
+""")
+account_map   = dict(zip(account_df['site_id'].astype(str), account_df['customer_account_name']))
+site_name_map = dict(zip(account_df['site_id'].astype(str), account_df['site_name']))
+
 # LISTE : {site_id: DataFrame cumulant toutes les périodes, avec colonne 'couverture'}
 LISTE = {}
 rejected = []
@@ -228,20 +241,32 @@ for site_prefix in site_prefixes[:2]:
                 .agg(mean_occupancy=(VALUE_COL, 'mean'))
                 .rename_axis(TIME_COL)
             )
-            fused['couverture'] = couverture
+            fused = fused.rename_axis('payload_timestamp')
+            fused['coverage'] = couverture
+            fused['customer_account_name'] = account_map.get(site_id.split('=', 1)[-1], None)
             fused['period'] = period
+            site_id_val = site_id.split('=', 1)[-1]
+            df_out = fused.reset_index()
             if LOCAL_TEST:
                 out_dir = os.path.join('./data/sample_s3/site_occupancy', site_id)
                 os.makedirs(out_dir, exist_ok=True)
-                fused.reset_index().to_parquet(
-                    os.path.join(out_dir, f'{period}.parquet'), index=False
-                )
+                df_out.to_parquet(os.path.join(out_dir, f'{period}.parquet'), index=False)
             else:
                 buf = BytesIO()
-                fused.reset_index().to_parquet(buf, index=False)
+                df_out.to_parquet(buf, index=False)
                 buf.seek(0)
                 s3_key = f"{S3_OUTPUT_PREFIX}{site_id}/{period}.parquet"
                 _s3.upload_fileobj(buf, S3_BUCKET, s3_key)
+            # Écriture dans ClickHouse stage
+            df_ck = pd.DataFrame({
+                'payload_timestamp': df_out['payload_timestamp'],
+                'site_id':           site_id_val,
+                'site_name':         site_name_map.get(site_id_val, None),
+                'customer_account_name': account_map.get(site_id_val, None),
+                'mean_occupancy':    df_out['mean_occupancy'],
+                'coverage':          df_out['coverage'],
+            })
+            stage_client.insert_df('Myriam_test.site_occupancy', df_ck)
             site_periods.append(fused)
 
     if site_periods:
