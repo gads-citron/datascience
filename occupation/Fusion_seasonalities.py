@@ -1,3 +1,6 @@
+import subprocess
+subprocess.run(["pip", "install", "clickhouse-connect"], check=True)
+
 from dotenv import load_dotenv
 import urllib.parse
 from io import BytesIO
