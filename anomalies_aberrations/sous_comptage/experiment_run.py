@@ -29,6 +29,7 @@ def tqdm_joblib(tqdm_object):
         tqdm_object.close()
 
 URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN'
+EXP_NAME = "Sous-Comptage_IQ_2025_Anomaly-Detection"
 
 def _is_s3(folder: str) -> bool:
     return folder.startswith("s3://")
@@ -111,7 +112,7 @@ def run(method, window, param, anom_dir, description="", window_type="tumbling")
     merged['anomaly'] = merged['anomaly'].fillna(0).astype(int)
     tn, fp, fn, tp = confusion_matrix(merged['VT_myriam'], merged['anomaly']).ravel()
     mlflow.set_tracking_uri(URI_MLFLOW)
-    mlflow.set_experiment("Sous-Comptage_Anomaly-Detection")
+    mlflow.set_experiment(EXP_NAME)
     datetime = pd.Timestamp.now().strftime("%m%d-%H%M")
     with mlflow.start_run(run_name=f"{method}-{param}-{datetime}"):
         mlflow.set_tag("mlflow.note.content", description)
