@@ -1,5 +1,4 @@
 import os
-from joblib import Parallel, delayed
 import experiment_run as exp
 
 ANOM_DIR = os.environ.get(
@@ -43,4 +42,5 @@ def run_cfg(cfg):
         anom_dir=ANOM_DIR,
         description=description,
     )
-Parallel(n_jobs=3, backend="loky")(delayed(run_cfg)(cfg) for cfg in configs)
+for cfg in configs:
+    run_cfg(cfg)
