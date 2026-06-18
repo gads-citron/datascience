@@ -64,7 +64,7 @@ def classify_data(smp, method, w, param, window_type="tumbling", log10=False):
             ctx = smp.loc[mask_window].copy()
             if ctx.empty:
                 continue
-            detector.predict(ctx, "raw_value")
+            ctx = detector.predict(ctx, "raw_value")
             center = ctx.loc[ctx['payload_expected_time'] == t]
             if not center.empty and center['anomaly'].iloc[0] == 1:
                 anomalies.append(center)
@@ -75,7 +75,7 @@ def classify_data(smp, method, w, param, window_type="tumbling", log10=False):
             mask_window = (smp['payload_expected_time'] >= current) & (smp['payload_expected_time'] < current + delta)
             window = smp.loc[mask_window].copy()
             if not window.empty:
-                detector.predict(window, "raw_value")
+                window = detector.predict(window, "raw_value")
                 mask = window['anomaly'] == 1
                 anomalies.append(window.loc[mask])
             current += delta
