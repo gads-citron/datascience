@@ -7,8 +7,8 @@ ANOM_DIR = os.environ.get(
 )
 
 BASE_DESCRIPTION = (
-    "Analyse sur les données de sous-comptage 1er semestre 2025 uniquement, tous sites confondus. "
-    "Les anomalies sont détectées avec la méthode {method} (params : {params}) "
+    "Analyse sur les données de sous-comptage clients IQ, année 2026 uniquement, tous sites confondus. "
+    "Les anomalies sont détectées avec la méthode {method} (params : {params}) avec transformation log10"
     "sur des périodes glissantes de {window} semaines."
 )
 URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN'
