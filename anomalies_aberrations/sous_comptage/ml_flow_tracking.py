@@ -45,7 +45,7 @@ def run_cfg(cfg):
         param=cfg["param"],
         anom_dir=ANOM_DIR,
         description=description,
-        log_10=True,
+        log10=True,
     )
 for cfg in configs:
     run_cfg(cfg)
