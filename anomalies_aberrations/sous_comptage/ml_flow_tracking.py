@@ -12,7 +12,7 @@ BASE_DESCRIPTION = (
     "sur des périodes glissantes de {window} semaines."
 )
 URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN'
-EXP_NAME = "Sous-Comptage_IQ_2025_Anomaly-Detection"
+EXP_NAME = "Sous-Comptage_IQ_2026_Anomaly-Detection"
 
 WINDOW = 8
 configs = [
