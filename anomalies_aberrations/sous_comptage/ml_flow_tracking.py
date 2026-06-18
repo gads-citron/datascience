@@ -11,8 +11,10 @@ BASE_DESCRIPTION = (
     "Les anomalies sont détectées avec la méthode {method} (params : {params}) "
     "sur des périodes glissantes de {window} semaines."
 )
-WINDOW = 12
+URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN'
+EXP_NAME = "Sous-Comptage_IQ_2025_Anomaly-Detection"
 
+WINDOW = 8
 configs = [
     {"method": "iso_forest", "param": {"th": -0.6}},
     {"method": "iso_forest", "param": {"th": -0.5}},
@@ -36,6 +38,8 @@ def run_cfg(cfg):
         window=WINDOW,
     )
     exp.run(
+        experiment_name=EXP_NAME,
+        uri_mlflow=URI_MLFLOW,
         method=cfg["method"],
         window=WINDOW,
         param=cfg["param"],

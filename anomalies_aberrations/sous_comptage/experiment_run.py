@@ -28,9 +28,6 @@ def tqdm_joblib(tqdm_object):
         joblib.parallel.BatchCompletionCallBack = old
         tqdm_object.close()
 
-URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN'
-EXP_NAME = "Sous-Comptage_IQ_2025_Anomaly-Detection"
-
 def _is_s3(folder: str) -> bool:
     return folder.startswith("s3://")
 
@@ -85,7 +82,7 @@ def classify_data(smp, method, w, param, window_type="tumbling"):
 
     return pd.concat(anomalies, ignore_index=True) if anomalies else pd.DataFrame()
 
-def run(method, window, param, anom_dir, description="", window_type="tumbling"):
+def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", window_type="tumbling"):
     if _is_s3(anom_dir):
         parts = anom_dir.replace("s3://", "", 1).split("/", 1)
         bucket, prefix = parts[0], parts[1].rstrip("/")
@@ -111,8 +108,8 @@ def run(method, window, param, anom_dir, description="", window_type="tumbling")
     )
     merged['anomaly'] = merged['anomaly'].fillna(0).astype(int)
     tn, fp, fn, tp = confusion_matrix(merged['VT_myriam'], merged['anomaly']).ravel()
-    mlflow.set_tracking_uri(URI_MLFLOW)
-    mlflow.set_experiment(EXP_NAME)
+    mlflow.set_tracking_uri(uri_mlflow)
+    mlflow.set_experiment(exp_name)
     datetime = pd.Timestamp.now().strftime("%m%d-%H%M")
     with mlflow.start_run(run_name=f"{method}-{param}-{datetime}"):
         mlflow.set_tag("mlflow.note.content", description)
@@ -124,10 +121,12 @@ def run(method, window, param, anom_dir, description="", window_type="tumbling")
         mlflow.log_metric("precision", precision_score(merged['VT_myriam'], merged['anomaly']))
         mlflow.log_metric("recall", recall_score(merged['VT_myriam'], merged['anomaly']))
         mlflow.log_metric("f1", f1_score(merged['VT_myriam'], merged['anomaly']))
+        n_pos = tp + fn
+        n_neg = tn + fp
         mlflow.log_metric("TP", tp)
-        mlflow.log_metric("FN", fn)
+        mlflow.log_metric("taux_FN", fn / n_pos)
         mlflow.log_metric("TN", tn)
-        mlflow.log_metric("FP", fp)
+        mlflow.log_metric("taux_FP", fp / n_neg)
 
         ref_cols = ['site_id', 'device_id', 'sensor_id', 'payload_expected_time']
         fp_df = merged.loc[(merged['VT_myriam'] == 0) & (merged['anomaly'] == 1), ref_cols]
