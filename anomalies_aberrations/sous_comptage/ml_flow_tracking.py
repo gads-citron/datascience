@@ -38,7 +38,7 @@ def run_cfg(cfg):
         window=WINDOW,
     )
     exp.run(
-        experiment_name=EXP_NAME,
+        exp_name=EXP_NAME,
         uri_mlflow=URI_MLFLOW,
         method=cfg["method"],
         window=WINDOW,
