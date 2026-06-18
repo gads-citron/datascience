@@ -14,7 +14,7 @@ from anomaly_detector import DataProcessor
 
 #%% S3 destination
 S3_BUCKET = os.environ.get("S3_BUCKET", "gads-citron-sagemaker-custom-stage")
-S3_PREFIX = os.environ.get("S3_PREFIX", "data/anomaly/tertiary_IQ/")
+S3_PREFIX = os.environ.get("S3_PREFIX", "data/anomaly/tertiary_IQ/2025/")
 UPLOAD_TO_S3 = os.environ.get("UPLOAD_TO_S3", "1") == "1"
 s3_client = boto3.client("s3") if UPLOAD_TO_S3 else None
 prod_client = ClickHouseClient()
@@ -67,7 +67,7 @@ def main(start, end, period, input_dir, output_dir):
     sous_comptage = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
     x_time = 'payload_expected_time'
 
-    list_anom = pd.read_csv(f'{input_dir}/iq_spot_detection_stl_isof_2026.csv')
+    list_anom = pd.read_csv(f'{input_dir}/verite_terrain.csv')
     candidates = list_anom[['customer_account_name', 'device_id', 'sensor_id']].drop_duplicates()
     for i, row in tqdm(candidates.iterrows(), total=candidates.shape[0]):
         record = {
@@ -114,11 +114,11 @@ def main(start, end, period, input_dir, output_dir):
 #%% Collect parameters
 if __name__=="__main__":
     parser = argparse.ArgumentParser(description="Export données ClickHouse vers Parquet/S3")
-    parser.add_argument("--start",      default="2026-01-01 00:00:00", help="Date de début (YYYY-MM-DD HH:MM:SS)")
-    parser.add_argument("--end",        default="2026-06-01 23:59:59", help="Date de fin   (YYYY-MM-DD HH:MM:SS)")
-    parser.add_argument("--period",     default="2026_sem1", help="Nom de la période traitée par les données.")
-    parser.add_argument("--output_dir", default="./data/sample_anomalies_IQ_2026", dest="output_dir", help="Dossier de sortie local")
-    parser.add_argument("--input_dir",  default="./data/sample_anomalies_IQ_2026", dest="input_dir", help="Dossier de sortie local")
+    parser.add_argument("--start",      default="2025-01-01 00:00:00", help="Date de début (YYYY-MM-DD HH:MM:SS)")
+    parser.add_argument("--end",        default="2025-12-31 23:59:59", help="Date de fin   (YYYY-MM-DD HH:MM:SS)")
+    parser.add_argument("--period",     default="2025", help="Nom de la période traitée par les données.")
+    parser.add_argument("--output_dir", default="./data/sample_anomalies_IQ_2025", dest="output_dir", help="Dossier de sortie local")
+    parser.add_argument("--input_dir",  default="./data/sample_anomalies_IQ_2025", dest="input_dir", help="Dossier de sortie local")
     args = parser.parse_args()
     start      = args.start
     end        = args.end
