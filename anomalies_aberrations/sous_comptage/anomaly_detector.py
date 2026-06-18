@@ -34,8 +34,9 @@ class DataProcessor:
         return 0 if score > tol else 1  # 0=volume, 1=index
 
 class Detector:
-    def __init__(self, method, param):
+    def __init__(self, method, param, log10=False):
         self.x_time = 'payload_expected_time'
+        self.use_log10 = log10
         self.detect_fn = getattr(self, method)
         defaults = {
             k: v.default
@@ -46,6 +47,9 @@ class Detector:
         self.param = defaults
 
     def predict(self, df, y_name):
+        if self.use_log10:
+            df = df.copy()
+            df[y_name] = np.log10(df[y_name].clip(lower=0) + 1)
         df['anomaly'] = self.detect_fn(df, y_name, **self.param)
         return df
 

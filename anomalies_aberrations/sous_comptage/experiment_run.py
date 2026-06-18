@@ -47,9 +47,9 @@ def load_all_parquets(folder: str, site_ids: list) -> pd.DataFrame:
     files = [f for s in site_ids for f in glob.glob(str(base / f"site_id={s}" / "**" / "*.parquet"), recursive=True)]
     return duckdb.sql(f"SELECT * FROM read_parquet({[str(f) for f in files]})").df()
 
-def classify_data(smp, method, w, param, window_type="tumbling"):
+def classify_data(smp, method, w, param, window_type="tumbling", log10=False):
     """ avec un jeu de données """
-    detector = Detector(method, param)
+    detector = Detector(method, param, log10=log10)
     smp['raw_value'] = smp.raw_value.interpolate()
     smp = smp.sort_values('payload_expected_time')
     delta = pd.Timedelta(weeks=w)
@@ -82,7 +82,7 @@ def classify_data(smp, method, w, param, window_type="tumbling"):
 
     return pd.concat(anomalies, ignore_index=True) if anomalies else pd.DataFrame()
 
-def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", window_type="tumbling"):
+def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", window_type="tumbling", log10=False):
     if _is_s3(anom_dir):
         parts = anom_dir.replace("s3://", "", 1).split("/", 1)
         bucket, prefix = parts[0], parts[1].rstrip("/")
@@ -97,7 +97,7 @@ def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", w
     groups = list(df.groupby(['site_id', 'device_id', 'sensor_id']))
     with tqdm_joblib(tqdm(total=len(groups), desc="Classification")):
         results = Parallel(n_jobs=-1)(
-            delayed(classify_data)(g, method, window, param, window_type)
+            delayed(classify_data)(g, method, window, param, window_type, log10)
             for _, g in groups
         )
     anom_df = pd.concat([r for r in results if not r.empty], ignore_index=True)
@@ -118,6 +118,7 @@ def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", w
         mlflow.log_param("window", window)
         mlflow.log_param("window_type", window_type)
         mlflow.log_param("param", param)
+        mlflow.log_param("log10", log10)
         mlflow.log_metric("precision", precision_score(merged['VT_myriam'], merged['anomaly']))
         mlflow.log_metric("recall", recall_score(merged['VT_myriam'], merged['anomaly']))
         mlflow.log_metric("f1", f1_score(merged['VT_myriam'], merged['anomaly']))
@@ -148,5 +149,6 @@ if __name__ == "__main__":
     parser.add_argument('--anom_dir', type=str, required=True)
     parser.add_argument('--window_type', type=str, default="tumbling", choices=["tumbling", "centered"])
     parser.add_argument('--description', type=str, default="")
+    parser.add_argument('--log10', action='store_true', help="applique log10(x+1) avant détection")
     args = parser.parse_args()
-    run(args.method, args.window, args.param, args.anom_dir, args.description, args.window_type)
+    run(args.method, args.window, args.param, args.anom_dir, args.description, args.window_type, args.log10)
