@@ -100,7 +100,12 @@ def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", w
             delayed(classify_data)(g, method, window, param, window_type, log10)
             for _, g in groups
         )
-    anom_df = pd.concat([r for r in results if not r.empty], ignore_index=True)
+    non_empty = [r for r in results if not r.empty]
+    anom_df = (
+        pd.concat(non_empty, ignore_index=True)
+        if non_empty
+        else pd.DataFrame(columns=['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'anomaly'])
+    )
     merged = vt.merge(
         anom_df[['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'anomaly']],
         on=['site_id', 'device_id', 'sensor_id', 'payload_expected_time'],
