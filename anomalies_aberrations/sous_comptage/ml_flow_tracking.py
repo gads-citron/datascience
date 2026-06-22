@@ -1,18 +1,20 @@
 import os
 import experiment_run as exp
 
+YEAR = 2026
+
 ANOM_DIR = os.environ.get(
     "ANOM_DIR",
-    "s3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary_IQ/2026"
+    f"s3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary_IQ/{YEAR}"
 )
 
 BASE_DESCRIPTION = (
-    "Analyse sur les données de sous-comptage clients IQ, année 2026 uniquement, tous sites confondus. "
+    f"Analyse sur les données de sous-comptage clients IQ, année {YEAR} uniquement, tous sites confondus. "
     "Les anomalies sont détectées avec la méthode {method} (params : {params}) avec transformation log10"
     "sur des périodes glissantes de {window} semaines."
 )
 URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN'
-EXP_NAME = "Sous-Comptage_IQ_2026_Anomaly-Detection"
+EXP_NAME = f"Sous-Comptage_IQ_{YEAR}_Anomaly-Detection"
 
 WINDOW = 8
 configs = [

@@ -61,7 +61,8 @@ class Detector:
             iqr = 10
         cutoff = iqr * k
         th = q75 + cutoff
-        return s > th
+        # Compare raw values to avoid bleed-over false positives after a spike
+        return df[y_name] > th
 
     def stl(self, df, y_name, k=3, smooth_window=3):
         s = df.set_index(self.x_time)[y_name].asfreq('h').interpolate()
