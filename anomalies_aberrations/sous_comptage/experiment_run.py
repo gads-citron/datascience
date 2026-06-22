@@ -112,6 +112,8 @@ def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", w
         how='left'
     )
     merged['anomaly'] = merged['anomaly'].fillna(0).astype(int)
+    merged = merged.dropna(subset=['VT_myriam'])
+    merged['VT_myriam'] = merged['VT_myriam'].astype(int)
     tn, fp, fn, tp = confusion_matrix(merged['VT_myriam'], merged['anomaly']).ravel()
     mlflow.set_tracking_uri(uri_mlflow)
     mlflow.set_experiment(exp_name)
