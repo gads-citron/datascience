@@ -8,8 +8,10 @@ import plotly.graph_objects as go
 from pathlib import Path
 import citron_colors as col
 
-CSV_DIR  = 's3://sagemaker-eu-west-3-585762237892/2/893314ffb09f4810a29f8dbdfffae185/artifacts'
-DATA_DIR = 's3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary'
+CSV_DIR  = 's3://sagemaker-eu-west-3-585762237892/workspaces/default/1/4adf6a370c71483c895ddb9786e1292e/artifacts'
+DATA_DIR = 's3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary_IQ/2026'
+VT_COL   = 'VT_myriam'
+VT_FILES = sorted(glob.glob('data/**/verite_terrain*.csv', recursive=True))
 
 def _is_s3(path):
     return str(path).startswith('s3://')
@@ -62,6 +64,12 @@ def load_all_cases():
         return pd.DataFrame()
     return pd.concat(dfs, ignore_index=True)
 
+def load_vt(path):
+    df = pd.read_csv(path)
+    df['payload_expected_time'] = pd.to_datetime(
+        df['payload_expected_time'], utc=True).dt.tz_convert(None)
+    return df
+
 # ── chargement ────────────────────────────────────────────────────────────────
 cases = load_all_cases()
 
@@ -76,6 +84,12 @@ if 'idx' not in st.session_state:
 
 idx = min(st.session_state.idx, n - 1)
 
+# ── cas courant ───────────────────────────────────────────────────────────────
+row        = cases.iloc[idx]
+event_time = row['payload_expected_time']
+is_fp      = row['_type'] == 'Faux Positif'
+label      = '🔴 Faux Positif' if is_fp else '🟠 Faux Négatif'
+
 # ── sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title('Revue FP / FN')
@@ -88,12 +102,41 @@ with st.sidebar:
               on_click=lambda: st.session_state.update(idx=idx + 1))
     st.progress((idx + 1) / n)
 
-# ── cas courant ───────────────────────────────────────────────────────────────
-row        = cases.iloc[idx]
-event_time = row['payload_expected_time']
-is_fp      = row['_type'] == 'Faux Positif'
-label      = '🔴 Faux Positif' if is_fp else '🟠 Faux Négatif'
+    st.divider()
+    st.subheader('Vérité terrain')
+    if VT_FILES:
+        vt_path = st.selectbox('Fichier VT', VT_FILES, label_visibility='collapsed')
+        vt_key  = f'vt_{vt_path}'
+        if vt_key not in st.session_state:
+            st.session_state[vt_key] = load_vt(vt_path)
+        vt_df = st.session_state[vt_key]
 
+        mask = (
+            (vt_df['site_id'].astype(str) == str(row['site_id'])) &
+            (vt_df['device_id'].astype(str) == str(row['device_id'])) &
+            (vt_df['payload_expected_time'] == event_time)
+        )
+        if mask.any():
+            vt_idx  = vt_df[mask].index[0]
+            current = int(vt_df.loc[vt_idx, VT_COL])
+            new_val = st.radio(
+                'Label',
+                [0, 1],
+                index=current,
+                format_func=lambda x: ('✅ Anomalie' if x else '❌ Pas anomalie'),
+                horizontal=True,
+                key=f'vt_radio_{idx}',
+            )
+            if st.button('💾 Sauvegarder', use_container_width=True):
+                st.session_state[vt_key].loc[vt_idx, VT_COL] = new_val
+                st.session_state[vt_key].to_csv(vt_path, index=False)
+                st.success('Sauvegardé !')
+        else:
+            st.caption('Ce cas n\'est pas dans le fichier VT sélectionné.')
+    else:
+        st.info('Aucun fichier verite_terrain trouvé.')
+
+# ── en-tête principal ─────────────────────────────────────────────────────────
 st.markdown(f'## {label}')
 m1, m2 = st.columns(2)
 m1.metric('site_id',   str(row['site_id']))
