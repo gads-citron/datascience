@@ -115,10 +115,11 @@ def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", w
     merged = merged.dropna(subset=['VT_myriam'])
     merged['VT_myriam'] = merged['VT_myriam'].astype(int)
     tn, fp, fn, tp = confusion_matrix(merged['VT_myriam'], merged['anomaly']).ravel()
+    dataset_name = "/".join(anom_dir.rstrip("/").split("/")[-2:])
     dataset = mlflow.data.from_pandas(
         df,
         source=anom_dir,
-        name="Donnees labellisées - clients IQspot"
+        name=dataset_name
     )
     mlflow.set_tracking_uri(uri_mlflow)
     mlflow.set_experiment(exp_name)
