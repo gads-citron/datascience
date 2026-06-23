@@ -13,7 +13,7 @@ BASE_DESCRIPTION = (
     "Les anomalies sont détectées avec la méthode {method} (params : {params}) avec transformation log10"
     "sur des périodes glissantes de {window} semaines."
 )
-URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN'
+URI_MLFLOW = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-CZPP4GNRF7VT'
 EXP_NAME = f"Sous-Comptage_IQ_{YEAR}_Anomaly-Detection"
 
 WINDOW = 8
@@ -27,9 +27,9 @@ configs = [
     {"method": "stl",        "param": {"k": 1.5}},
     {"method": "stl",        "param": {"k": 3}},
     {"method": "stl",        "param": {"k": 10}},
-    {"method": "arima",      "param": {"p": 6, "d": 1, "q": 1}},
-    {"method": "arima",      "param": {"p": 12, "d": 1, "q": 2}},
-    {"method": "arima",      "param": {"p": 24, "d": 1, "q": 1}},
+    # {"method": "arima",      "param": {"p": 6, "d": 1, "q": 1}},
+    # {"method": "arima",      "param": {"p": 12, "d": 1, "q": 2}},
+    # {"method": "arima",      "param": {"p": 24, "d": 1, "q": 1}},
 ]
 
 def run_cfg(cfg):

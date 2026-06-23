@@ -115,12 +115,18 @@ def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", w
     merged = merged.dropna(subset=['VT_myriam'])
     merged['VT_myriam'] = merged['VT_myriam'].astype(int)
     tn, fp, fn, tp = confusion_matrix(merged['VT_myriam'], merged['anomaly']).ravel()
+    dataset = mlflow.data.from_pandas(
+        df,
+        source=anom_dir,
+        name="Donnees labellisées - clients IQspot"
+    )
     mlflow.set_tracking_uri(uri_mlflow)
     mlflow.set_experiment(exp_name)
     datetime = pd.Timestamp.now().strftime("%m%d-%H%M")
     with mlflow.start_run(run_name=f"{method}-{param}-{datetime}"):
         mlflow.set_tag("mlflow.note.content", description)
         mlflow.sklearn.autolog()
+        mlflow.log_input(dataset)
         mlflow.log_param("method", method)
         mlflow.log_param("window", window)
         mlflow.log_param("window_type", window_type)
