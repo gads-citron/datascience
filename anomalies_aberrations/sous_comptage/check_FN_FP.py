@@ -85,7 +85,8 @@ def load_vt(path):
         df = pd.read_csv(path)
     dt = pd.to_datetime(df['payload_expected_time'], format='mixed')
     df['payload_expected_time'] = [
-        pd.Timestamp(t).tz_convert(None) if t.tzinfo else pd.Timestamp(t)
+        pd.Timestamp(t).tz_convert(None) if pd.notna(t) and t.tzinfo
+        else (pd.Timestamp(t) if pd.notna(t) else pd.NaT)
         for t in dt
     ]
     return df
