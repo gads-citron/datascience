@@ -53,7 +53,7 @@ def run_cfg(cfg):
         exp_name=EXP_NAME,
         uri_mlflow=URI_MLFLOW,
         method=cfg["method"],
-        window=WINDOW,
+        window=cfg['window'],
         param=cfg["param"],
         anom_dir=ANOM_DIR,
         description=description,
