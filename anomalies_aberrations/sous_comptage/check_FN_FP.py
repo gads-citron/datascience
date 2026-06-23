@@ -83,8 +83,10 @@ def load_vt(path):
         df = pd.read_csv(obj['Body'])
     else:
         df = pd.read_csv(path)
-    df['payload_expected_time'] = pd.to_datetime(
-        df['payload_expected_time'], format='mixed', utc=True).dt.tz_convert(None)
+    dt = pd.to_datetime(df['payload_expected_time'], format='mixed')
+    df['payload_expected_time'] = [
+        t.tz_convert(None) if t.tzinfo else t for t in dt
+    ]
     return df
 
 def save_vt(df, path):
