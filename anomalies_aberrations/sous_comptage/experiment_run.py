@@ -80,7 +80,16 @@ def classify_data(smp, method, w, param, window_type="tumbling", log10=False):
                 anomalies.append(window.loc[mask])
             current += delta
 
-    return pd.concat(anomalies, ignore_index=True) if anomalies else pd.DataFrame()
+    neg = smp.loc[smp['raw_value'] < 0].copy()
+    if not neg.empty:
+        neg['anomaly'] = 1
+        anomalies.append(neg)
+
+    if not anomalies:
+        return pd.DataFrame()
+    return (pd.concat(anomalies, ignore_index=True)
+              .drop_duplicates(subset=['payload_expected_time'])
+              .reset_index(drop=True))
 
 def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", window_type="tumbling", log10=False):
     if _is_s3(anom_dir):
