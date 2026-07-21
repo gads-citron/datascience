@@ -8,7 +8,7 @@ from db_connector import ClickHouseClient
 # ── config ────────────────────────────────────────────────────────────────────
 # INPUT_FOLDER  = './data/sample_anomalies_2025_sem_1'
 # CSV_PATH      = f'{INPUT_FOLDER}/verite_terrain.csv'
-CSV_PATH      = f'./data/iq_spot_detection_stl_isof_2026.csv'
+CSV_PATH      = f'./data/sample_anomalies_IQ_2026/verite_terrain_IQ_2026.csv'
 SOUS_COMPTAGE = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
 START         = '2026-01-01 00:00:00'
 END           = '2026-12-31 00:00:00'
@@ -40,6 +40,8 @@ if 'anomalies' not in st.session_state:
     df = df[df['isof']==1].reset_index(drop=True)
     if 'VT_myriam' not in df.columns:
         df['VT_myriam'] = pd.NA
+    if 'autre' not in df.columns:
+        df['autre'] = pd.NA
     st.session_state.anomalies = df
 
 for key, default in [('g_idx', 0), ('a_idx', 0)]:
@@ -82,6 +84,12 @@ def validate(val):
         st.session_state.g_idx = g_idx + 1
         st.session_state.a_idx = 0
 
+def tag_radar():
+    mask = (st.session_state.anomalies['site_id'] == site_id) & \
+           (st.session_state.anomalies['device_id'] == device_id)
+    st.session_state.anomalies.loc[mask, 'autre'] = 'radar'
+    next_group()
+
 # ── sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title('Validation VT_myriam')
@@ -110,6 +118,12 @@ with st.sidebar:
               on_click=validate, args=(1,))
     st.button('0 — Fausse alerte',               use_container_width=True,
               on_click=validate, args=(0,))
+
+    st.divider()
+
+    st.subheader('Autre')
+    st.button('radar', disabled=(g_idx == n_groups - 1), use_container_width=True,
+              on_click=tag_radar)
 
     st.divider()
 

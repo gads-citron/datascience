@@ -80,10 +80,11 @@ def classify_data(smp, method, w, param, window_type="tumbling", log10=False):
                 anomalies.append(window.loc[mask])
             current += delta
 
-    neg = smp.loc[smp['raw_value'] < 0].copy()
-    if not neg.empty:
-        neg['anomaly'] = 1
-        anomalies.append(neg)
+    if method == "iqr":
+        neg = smp.loc[smp['raw_value'] < 0].copy()
+        if not neg.empty:
+            neg['anomaly'] = 1
+            anomalies.append(neg)
 
     if not anomalies:
         return pd.DataFrame()
