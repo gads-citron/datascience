@@ -7,7 +7,7 @@ from io import BytesIO
 import json
 import pandas as pd
 import os
-# import clickhouse_connect
+import clickhouse_connect
 import boto3
 import datetime as dt
 import numpy as np

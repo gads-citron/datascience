@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from decompose import fast_robustSTL
+from ground_truth_pipeline.decompose import fast_robustSTL
 
 
 class Seasonality:

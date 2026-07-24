@@ -13,12 +13,12 @@ import json
 import boto3
 import logging
 from tqdm import tqdm
-import param as p
 
 #%% collect parameters
 start = "2025-01-01 00:00:00"
 end = "2026-06-30 23:59:59"
 x_time = 'payload_expected_time'
+datasource = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
 output_dir = './data_collect/sample_s3/'
 
 #%% S3 destination (aligné sur run_sagemaker.py)
@@ -135,7 +135,7 @@ prod_client = db_connect(type='prod')
 #%% devices from which collect is to be done:
 devices_list = prod_client.query_df(f"""
     SELECT distinct site_id, device_id, sensor_id
-    FROM {p.datasource}
+    FROM {datasource}
     WHERE 1=1
     AND {x_time} between '{start}' and '{end}'
     AND site_id IN {candidates.site_id.drop_duplicates().to_list()}
@@ -150,7 +150,7 @@ for i, row in tqdm(devices_list.iterrows(), total=len(devices_list)):
                     "sensor_name":row.sensor_id}
     df = prod_client.query_df(f"""
         SELECT site_id, device_id, {x_time}, sum_payload_value_hour_curr, eval_prev_hour, sensor_id, entity
-        FROM {p.datasource}
+        FROM {datasource}
         WHERE 1=1
         AND {x_time} between '{start}' and '{end}'
         AND device_id = '{row.device_id}'
