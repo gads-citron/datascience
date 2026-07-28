@@ -119,11 +119,10 @@ def run(exp_name, uri_mlflow, method, window, param, anom_dir, description="", w
     merged = vt.merge(
         anom_df[['site_id', 'device_id', 'sensor_id', 'payload_expected_time', 'anomaly']],
         on=['site_id', 'device_id', 'sensor_id', 'payload_expected_time'],
-        how='left'
+        how='outer'
     )
     merged['anomaly'] = merged['anomaly'].fillna(0).astype(int)
-    merged = merged.dropna(subset=['VT_myriam'])
-    merged['VT_myriam'] = merged['VT_myriam'].astype(int)
+    merged['VT_myriam'] = merged['VT_myriam'].fillna(0).astype(int)
     tn, fp, fn, tp = confusion_matrix(merged['VT_myriam'], merged['anomaly']).ravel()
     dataset_name = "/".join(anom_dir.rstrip("/").split("/")[-2:])
     dataset = mlflow.data.from_pandas(
