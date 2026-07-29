@@ -33,6 +33,13 @@ class DataProcessor:
         score = np.mean((self.df[y_name].shift() - self.df[y_name]) < 0)
         return 0 if score > tol else 1  # 0=volume, 1=index
 
+def dynamic_threshold(q25, q75, mu, a=1):
+    iqr = q75 - q25
+    if iqr < 1:
+        iqr = 10
+    k = mu + a / (1 + mu)
+    return k, q75 + k * iqr
+
 class Detector:
     def __init__(self, method, param, log10=False):
         self.x_time = 'payload_expected_time'
@@ -61,6 +68,14 @@ class Detector:
             iqr = 10
         cutoff = iqr * k
         th = q75 + cutoff
+        # Compare raw values to avoid bleed-over false positives after a spike
+        return df[y_name] > th
+
+    def iqr_dynamic_k(self, df, y_name, a=1, smooth_window=3):
+        s = df[y_name].rolling(window=smooth_window, min_periods=1).mean()
+        q25, q75 = np.percentile(s, [25, 75])
+        mu = df[y_name].mean()
+        _, th = dynamic_threshold(q25, q75, mu, a)
         # Compare raw values to avoid bleed-over false positives after a spike
         return df[y_name] > th
 
