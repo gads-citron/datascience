@@ -162,12 +162,12 @@ with st.sidebar:
                 st.success('Sauvegardé !')
         else:
             st.caption('Ce cas n\'est pas dans le fichier VT sélectionné.')
-            if is_fp and st.button('➕ Ajouter ce point à la VT (pas anomalie)', use_container_width=True):
+            if is_fp and st.button('➕ Ajouter ce point à la VT (anomalie)', use_container_width=True):
                 new_row = {
                     'site_id': row['site_id'],
                     'device_id': row['device_id'],
                     'payload_expected_time': event_time,
-                    VT_COL: 0,
+                    VT_COL: 1,
                 }
                 if 'sensor_id' in vt_df.columns and 'sensor_id' in row.index:
                     new_row['sensor_id'] = row['sensor_id']
@@ -196,7 +196,7 @@ with st.sidebar:
             new_rows = missing_fps[['site_id', 'device_id', 'payload_expected_time']].copy()
             if 'sensor_id' in vt_df.columns and 'sensor_id' in missing_fps.columns:
                 new_rows['sensor_id'] = missing_fps['sensor_id']
-            new_rows[VT_COL] = 0
+            new_rows[VT_COL] = 1
             st.session_state[vt_key] = pd.concat([vt_df, new_rows], ignore_index=True)
             save_vt(st.session_state[vt_key], vt_path)
             st.success(f'{len(new_rows)} lignes ajoutées à la VT !')
