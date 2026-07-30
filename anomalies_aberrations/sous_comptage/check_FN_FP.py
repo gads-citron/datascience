@@ -119,6 +119,18 @@ event_time = row['payload_expected_time']
 is_fp      = row['_type'] == 'Faux Positif'
 label      = '🔴 Faux Positif' if is_fp else '🟠 Faux Négatif'
 
+# ── navigation par device ────────────────────────────────────────────────────
+device_pairs = list(zip(cases['site_id'].astype(str), cases['device_id'].astype(str)))
+device_keys = list(dict.fromkeys(device_pairs))
+first_idx_per_device = {}
+for i, key in enumerate(device_pairs):
+    first_idx_per_device.setdefault(key, i)
+current_device_pos = device_keys.index((str(row['site_id']), str(row['device_id'])))
+
+def goto_device(offset):
+    new_pos = max(0, min(current_device_pos + offset, len(device_keys) - 1))
+    st.session_state.idx = first_idx_per_device[device_keys[new_pos]]
+
 # ── sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title('Revue FP / FN')
@@ -130,6 +142,13 @@ with st.sidebar:
     c2.button('Suiv. ▶', disabled=(idx == n - 1), use_container_width=True,
               on_click=lambda: st.session_state.update(idx=idx + 1))
     st.progress((idx + 1) / n)
+
+    st.caption(f'Device  {current_device_pos + 1} / {len(device_keys)}')
+    d1, d2 = st.columns(2)
+    d1.button('⏮ Device préc.', disabled=(current_device_pos == 0), use_container_width=True,
+              on_click=lambda: goto_device(-1))
+    d2.button('Device suiv. ⏭', disabled=(current_device_pos == len(device_keys) - 1),
+              use_container_width=True, on_click=lambda: goto_device(1))
 
     st.divider()
     st.subheader('Vérité terrain')
