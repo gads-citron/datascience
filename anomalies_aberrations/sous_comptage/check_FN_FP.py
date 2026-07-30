@@ -162,6 +162,45 @@ with st.sidebar:
                 st.success('Sauvegardé !')
         else:
             st.caption('Ce cas n\'est pas dans le fichier VT sélectionné.')
+            if is_fp and st.button('➕ Ajouter ce point à la VT (pas anomalie)', use_container_width=True):
+                new_row = {
+                    'site_id': row['site_id'],
+                    'device_id': row['device_id'],
+                    'payload_expected_time': event_time,
+                    VT_COL: 0,
+                }
+                if 'sensor_id' in vt_df.columns and 'sensor_id' in row.index:
+                    new_row['sensor_id'] = row['sensor_id']
+                st.session_state[vt_key] = pd.concat(
+                    [vt_df, pd.DataFrame([new_row])], ignore_index=True)
+                save_vt(st.session_state[vt_key], vt_path)
+                st.success('Point ajouté à la VT !')
+                st.rerun()
+
+        st.divider()
+        device_fps = cases[
+            (cases['_type'] == 'Faux Positif') &
+            (cases['site_id'].astype(str) == str(row['site_id'])) &
+            (cases['device_id'].astype(str) == str(row['device_id']))
+        ]
+        existing_keys = set(zip(
+            vt_df['site_id'].astype(str), vt_df['device_id'].astype(str), vt_df['payload_expected_time']))
+        missing_fps = device_fps[[
+            key not in existing_keys
+            for key in zip(device_fps['site_id'].astype(str), device_fps['device_id'].astype(str),
+                            device_fps['payload_expected_time'])
+        ]]
+        st.caption(f"{len(missing_fps)} faux positifs de ce device absents de la VT")
+        if st.button(f'➕ Ajouter les {len(missing_fps)} FP de ce device à la VT',
+                      use_container_width=True, disabled=missing_fps.empty):
+            new_rows = missing_fps[['site_id', 'device_id', 'payload_expected_time']].copy()
+            if 'sensor_id' in vt_df.columns and 'sensor_id' in missing_fps.columns:
+                new_rows['sensor_id'] = missing_fps['sensor_id']
+            new_rows[VT_COL] = 0
+            st.session_state[vt_key] = pd.concat([vt_df, new_rows], ignore_index=True)
+            save_vt(st.session_state[vt_key], vt_path)
+            st.success(f'{len(new_rows)} lignes ajoutées à la VT !')
+            st.rerun()
     else:
         st.info('Aucun fichier verite_terrain trouvé.')
 
