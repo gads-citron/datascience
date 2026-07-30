@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 from pathlib import Path
 import citron_colors as col
 
-CSV_DIR  = 's3://sagemaker-eu-west-3-585762237892/workspaces/default/1/4adf6a370c71483c895ddb9786e1292e/artifacts'
+CSV_DIR  = 's3://sagemaker-eu-west-3-585762237892/workspaces/default/1/a60429f8c87e4910a9ca464346be9b57/artifacts'
 DATA_DIR = 's3://gads-citron-sagemaker-custom-stage/data/anomaly/tertiary_IQ/2026'
 VT_COL   = 'VT_myriam'
 
