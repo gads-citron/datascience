@@ -80,7 +80,7 @@ def classify_data(smp, method, w, param, window_type="tumbling", log10=False):
                 anomalies.append(window.loc[mask])
             current += delta
 
-    if method == "iqr":
+    if method in ["iqr", "iqr_dynamic_k"] :
         neg = smp.loc[smp['raw_value'] < 0].copy()
         if not neg.empty:
             neg['anomaly'] = 1
