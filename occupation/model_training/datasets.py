@@ -64,7 +64,10 @@ def _load_rejected_df():
 def collect_power_data_s3(site_id, start, end):
     df = _read_parquets_from_s3(f"{POWER_S3_PREFIX}site_id={site_id}/")
     if df.empty:
-        return pd.DataFrame(columns=['payload_expected_time', 'raw_value'])
+        return pd.DataFrame({
+            'payload_expected_time': pd.Series(dtype='datetime64[ns]'),
+            'raw_value': pd.Series(dtype='float64'),
+        })
 
     rejected_df = _load_rejected_df()
     rejected_devices = set(rejected_df.loc[rejected_df['site_id'] == site_id, 'device_id'])
