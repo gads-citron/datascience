@@ -1,3 +1,9 @@
+"""
+Feed s3 bucket with water & elec raw data
+
+@author: Myriam Lopez
+"""
+
 import subprocess, sys
 subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt", "-q"])
 
@@ -26,7 +32,6 @@ S3_BUCKET = os.environ.get("S3_BUCKET", "gads-citron-sagemaker-custom-stage")
 S3_PREFIX = os.environ.get("S3_PREFIX", "data/power_clk_collect/")
 UPLOAD_TO_S3 = os.environ.get("UPLOAD_TO_S3", "1") == "1"
 s3_client = boto3.client("s3") if UPLOAD_TO_S3 else None
-
 #%% liste des sites IQ (ayant eau + elec)
 candidates = pd.read_csv('./data_collect/list_site_eau_and_elec_IQ.csv')
 
