@@ -167,6 +167,33 @@ def fwhm_by_weekday(y_true, y_pred, groups):
         })
     return pd.DataFrame(rows)
 
+def fwhm_diff_summary(fwhm_by_weekday_df):
+    # moyenne pondérée par n_jours (plutôt qu'une moyenne simple des 7 moyennes journalières déjà agrégées)
+    df = fwhm_by_weekday_df
+    weekday_mask = df['jour'].isin(['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi'])
+    weekend_mask = df['jour'].isin(['samedi', 'dimanche'])
+
+    def weighted_mean_diff(sub_df):
+        return (sub_df['diff'] * sub_df['n_jours']).sum() / sub_df['n_jours'].sum()
+
+    return {
+        'fwhm_diff_global': weighted_mean_diff(df),
+        'fwhm_diff_semaine': weighted_mean_diff(df[weekday_mask]),
+        'fwhm_diff_weekend': weighted_mean_diff(df[weekend_mask]),
+    }
+
+def bias_direction_summary(bias_by_strata_df):
+    # moyenne du mbe des strates en sur-estimation (mbe > 0) et en sous-estimation (mbe < 0), semaine vs week-end
+    df = bias_by_strata_df
+    result = {}
+    for jour_label, key in (('semaine', 'semaine'), ('week-end', 'weekend')):
+        day_df = df[df['jour'] == jour_label]
+        over = day_df.loc[day_df['mbe'] > 0, 'mbe']
+        under = day_df.loc[day_df['mbe'] < 0, 'mbe']
+        result[f'bias_overestimation_{key}'] = over.mean() if len(over) else np.nan
+        result[f'bias_underestimation_{key}'] = under.mean() if len(under) else np.nan
+    return result
+
 def compute_metrics(y_true, y_pred, groups=None):
     metrics = {
         'rmse': mean_squared_error(y_true, y_pred) ** 0.5,
@@ -252,10 +279,14 @@ def evaluate_model(model_type, model, artifacts, target_col='mean_occupancy'):
     metrics = compute_metrics(y_true, y_pred, groups)
     bias_by_strata = bias_amplitude_by_strata(y_true, y_pred, groups)
     fwhm_by_weekday_ = fwhm_by_weekday(y_true, y_pred, groups)
+    fwhm_diff_summary_ = fwhm_diff_summary(fwhm_by_weekday_)
+    bias_direction_summary_ = bias_direction_summary(bias_by_strata)
 
     print(metrics)
     print(bias_by_strata)
     print(fwhm_by_weekday_)
+    print(fwhm_diff_summary_)
+    print(bias_direction_summary_)
 
     return {
         'metrics': metrics,
@@ -263,6 +294,8 @@ def evaluate_model(model_type, model, artifacts, target_col='mean_occupancy'):
         'bias_by_strata': bias_by_strata,
         'fwhm_by_day': fwhm_by_day(y_true, y_pred, groups),
         'fwhm_by_weekday': fwhm_by_weekday_,
+        'fwhm_diff_summary': fwhm_diff_summary_,
+        'bias_direction_summary': bias_direction_summary_,
     }
 
 def plot_example(model_type, model, artifacts, site_id=None, target_col='mean_occupancy'):

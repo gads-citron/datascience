@@ -51,14 +51,14 @@ def log_evaluation_run(model_type, model, artifacts, results, run_name, note=Non
         else:
             mlflow.log_params({'seq_len': artifacts['seq_len'], 'stride': artifacts['stride']})
 
+        # métriques globales (rmse, nmae, dtw, rmse_weekly) + moyennes fwhm (global/semaine/week-end)
+        # + direction du biais (sur/sous-estimation, semaine/week-end) ; le détail heure par heure / jour
+        # par jour reste dispo en CSV, pas en métriques scalaires (trop de bruit dans l'UI)
         metrics = dict(results['metrics'])
-        # tables agrégées (peu de lignes) : loggées comme vraies métriques MLflow, exploitables dans l'UI
-        metrics.update(_table_to_metrics(results['bias_by_hour'], ['hour'], ['mbe', 'nmae'], 'bias_by_hour'))
-        metrics.update(_table_to_metrics(results['bias_by_strata'], ['jour', 'strate'], ['mbe', 'nmae'], 'bias_by_strata'))
-        metrics.update(_table_to_metrics(results['fwhm_by_weekday'], ['jour'], ['fwhm_true', 'fwhm_pred', 'diff'], 'fwhm_by_weekday'))
+        metrics.update(results['fwhm_diff_summary'])
+        metrics.update({k: v for k, v in results['bias_direction_summary'].items() if pd.notna(v)})
         mlflow.log_metrics(metrics)
 
-        # fwhm_by_day : une ligne par (site, jour), trop granulaire pour des métriques scalaires -> reste en CSV
         for table_name in ('bias_by_hour', 'bias_by_strata', 'fwhm_by_day', 'fwhm_by_weekday'):
             mlflow.log_text(results[table_name].to_csv(index=False), f"{table_name}.csv")
 
