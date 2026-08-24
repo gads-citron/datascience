@@ -242,6 +242,13 @@ def evaluate_model(model_type, model, artifacts, target_col='mean_occupancy'):
     else:
         raise ValueError(f"model_type doit être parmi {trn.MODEL_TYPES}, reçu '{model_type}'")
 
+    # prédictions volontairement NaN (raw_value manquant, cf. predict_lightgbm) : à exclure des métriques,
+    # sklearn ne tolère aucun NaN dans mean_squared_error/etc.
+    valid = ~np.isnan(y_pred)
+    if not valid.all():
+        print(f"{(~valid).sum()} prédictions ignorées pour le calcul des métriques (raw_value manquant) sur {len(y_pred)}")
+        y_true, y_pred, groups = y_true[valid], y_pred[valid], groups[valid].reset_index(drop=True)
+
     metrics = compute_metrics(y_true, y_pred, groups)
     bias_by_strata = bias_amplitude_by_strata(y_true, y_pred, groups)
     fwhm_by_weekday_ = fwhm_by_weekday(y_true, y_pred, groups)
