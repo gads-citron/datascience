@@ -61,6 +61,25 @@ def preprocess_zscore(df):
     df['raw_value'] = (df['raw_value'] - grouped.transform('mean')) / grouped.transform('std')
     return df
 
+def preprocess_rolling_zscore(df, window=24 * 30):
+    # comme zscore mais localement dans le temps : moyenne/écart-type glissants sur les 'window' dernières heures
+    # (au lieu d'une seule référence fixe sur tout l'historique du site), pour absorber la dérive saisonnière
+    grouped = df.groupby('site_id')['raw_value']
+    rolling_mean = grouped.transform(lambda s: s.rolling(window, min_periods=1).mean())
+    rolling_std = grouped.transform(lambda s: s.rolling(window, min_periods=2).std())
+    df['raw_value'] = (df['raw_value'] - rolling_mean) / rolling_std.replace(0, np.nan)
+    return df
+
+def preprocess_rolling_minmax(df, window=24 * 30):
+    # normalisation min-max locale : ramène raw_value dans [0, 1] par rapport au min/max glissants du site
+    # sur les 'window' dernières heures (0 = plus bas récent, 1 = plus haut récent)
+    grouped = df.groupby('site_id')['raw_value']
+    rolling_min = grouped.transform(lambda s: s.rolling(window, min_periods=1).min())
+    rolling_max = grouped.transform(lambda s: s.rolling(window, min_periods=1).max())
+    span = (rolling_max - rolling_min).replace(0, np.nan)
+    df['raw_value'] = (df['raw_value'] - rolling_min) / span
+    return df
+
 def preprocess_baseload_ratio(df, window=24 * 30, quantile=0.05):
     # exprime la conso relativement au baseload du bâtiment (percentile bas glissant, proche de la conso hors occupation)
     grouped = df.groupby('site_id')['raw_value']
@@ -73,6 +92,8 @@ PREPROCESSORS = {
     'none': preprocess_none,
     'log_zscore': preprocess_log_zscore,
     'zscore': preprocess_zscore,
+    'rolling_zscore': preprocess_rolling_zscore,
+    'rolling_minmax': preprocess_rolling_minmax,
     'baseload_ratio': preprocess_baseload_ratio,
 }
 

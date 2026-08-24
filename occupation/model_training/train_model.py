@@ -73,7 +73,7 @@ def log_evaluation_run(model_type, model, artifacts, results, run_name, note=Non
 
 
 def main():
-    preprocess = 'zscore'
+    preprocess = 'rolling_minmax'
     train_df, test_df = build_train_test_datasets(preprocess=preprocess)
     model_type = 'lightgbm'  # ou 'lightgbm'
     model, artifacts = train_model(model_type, train_df, test_df)
