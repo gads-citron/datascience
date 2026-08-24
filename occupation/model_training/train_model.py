@@ -10,8 +10,9 @@ subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requiremen
 
 from datetime import datetime
 import pandas as pd
+import matplotlib.pyplot as plt
 import mlflow
-import mlflow.sklearn
+import mlflow.lightgbm
 import mlflow.pytorch
 
 import datasets
@@ -23,7 +24,7 @@ from evaluation import evaluate_model, plot_example
 SAGE_ENV = True
 datasets.SAGE_ENV = SAGE_ENV
 
-mlflow.set_tracking_uri("arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-N4LROSLQN5BN")
+mlflow.set_tracking_uri("arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-CZPP4GNRF7VT")
 mlflow.set_experiment("Occupation-model-training")
 
 def _table_to_metrics(df, key_cols, value_cols, prefix):
@@ -62,9 +63,13 @@ def log_evaluation_run(model_type, model, artifacts, results, run_name, note=Non
             mlflow.log_text(results[table_name].to_csv(index=False), f"{table_name}.csv")
 
         if model_type == 'lightgbm':
-            mlflow.sklearn.log_model(model, artifact_path="model")
+            mlflow.lightgbm.log_model(model, artifact_path="model")
         else:
             mlflow.pytorch.log_model(model, artifact_path="model")
+
+        fig = plot_example(model_type, model, artifacts)
+        mlflow.log_figure(fig, "prediction_example.png")
+        plt.close(fig)
 
 
 def main():
@@ -84,8 +89,6 @@ def main():
         run_name=f"{model_type}_{datetime.now():%Y%m%d_%H%M%S}",
         dataset_tags=dataset_tags,
     )
-
-    #plot_example(model_type, model, artifacts)
 
 if __name__ == '__main__':
     main()

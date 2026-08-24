@@ -28,7 +28,7 @@ def train_lightgbm(train_df, test_df, target_col='mean_occupancy', params=None):
     X_train, y_train = train_df[feature_cols], train_df[target_col]
     X_test, y_test = test_df[feature_cols], test_df[target_col]
 
-    default_params = dict(objective='regression', metric='mae', n_estimators=500, learning_rate=0.05)
+    default_params = dict(objective='regression', metric='mae', n_estimators=500, learning_rate=0.05, force_row_wise=True)
     if params:
         default_params.update(params)
 

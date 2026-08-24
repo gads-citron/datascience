@@ -189,15 +189,15 @@ def plot_prediction_example(model, test_df, site_id=None, target_col='mean_occup
     y_true = site_df[target_col]
     y_pred = np.clip(model.predict(site_df[feature_cols]), 0, 1)
 
-    plt.figure(figsize=(14, 5))
-    plt.plot(site_df['payload_timestamp'], y_true, label='vérité terrain')
-    plt.plot(site_df['payload_timestamp'], y_pred, label='prédiction')
-    plt.title(f"Occupation prédite vs réelle - site {site_id}")
-    plt.xlabel('date')
-    plt.ylabel("taux d'occupation")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    fig, ax = plt.subplots(figsize=(14, 5))
+    ax.plot(site_df['payload_timestamp'], y_true, label='vérité terrain')
+    ax.plot(site_df['payload_timestamp'], y_pred, label='prédiction')
+    ax.set_title(f"Occupation prédite vs réelle - site {site_id}")
+    ax.set_xlabel('date')
+    ax.set_ylabel("taux d'occupation")
+    ax.legend()
+    fig.tight_layout()
+    return fig
 
 def plot_prediction_example_tcn_gru(model, test_df, feature_cols, site_id=None,
                                      target_col='mean_occupancy', seq_len=168, device=None):
@@ -220,15 +220,15 @@ def plot_prediction_example_tcn_gru(model, test_df, feature_cols, site_id=None,
     y_true = site_df[target_col].to_numpy()
     timestamps = site_df['payload_timestamp']
 
-    plt.figure(figsize=(14, 5))
-    plt.plot(timestamps, y_true, label='vérité terrain')
-    plt.plot(timestamps, y_pred, label='prédiction TCN-GRU')
-    plt.title(f"Occupation prédite (TCN-GRU) vs réelle - site {site_id}")
-    plt.xlabel('date')
-    plt.ylabel("taux d'occupation")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    fig, ax = plt.subplots(figsize=(14, 5))
+    ax.plot(timestamps, y_true, label='vérité terrain')
+    ax.plot(timestamps, y_pred, label='prédiction TCN-GRU')
+    ax.set_title(f"Occupation prédite (TCN-GRU) vs réelle - site {site_id}")
+    ax.set_xlabel('date')
+    ax.set_ylabel("taux d'occupation")
+    ax.legend()
+    fig.tight_layout()
+    return fig
 
 def evaluate_model(model_type, model, artifacts, target_col='mean_occupancy'):
     if model_type == 'lightgbm':
@@ -259,9 +259,9 @@ def evaluate_model(model_type, model, artifacts, target_col='mean_occupancy'):
 
 def plot_example(model_type, model, artifacts, site_id=None, target_col='mean_occupancy'):
     if model_type == 'lightgbm':
-        plot_prediction_example(model, artifacts['test_df'], site_id, target_col)
+        return plot_prediction_example(model, artifacts['test_df'], site_id, target_col)
     elif model_type == 'tcn_gru':
-        plot_prediction_example_tcn_gru(
+        return plot_prediction_example_tcn_gru(
             model, artifacts['test_df'], artifacts['feature_cols'],
             site_id, target_col, artifacts['seq_len'],
         )
