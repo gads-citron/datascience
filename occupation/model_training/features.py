@@ -39,6 +39,11 @@ def feature_creator(df):
 
     # TODO: température extérieure pas encore branchée (source pas encore définie) — à ajouter ici
     # (ex: brute + moyenne glissante + degrés-heure de chauffe/clim)
+
+    # float32 plutôt que float64 : divise par ~2 la mémoire du dataset (utile sur les petites instances SageMaker)
+    float_cols = df.select_dtypes(include='float64').columns
+    df[float_cols] = df[float_cols].astype('float32')
+
     return df
 
 def preprocess_none(df):
