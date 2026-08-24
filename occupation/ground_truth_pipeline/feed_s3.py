@@ -29,7 +29,7 @@ output_dir = './data_collect/sample_s3/'
 
 #%% S3 destination (aligné sur run_sagemaker.py)
 S3_BUCKET = os.environ.get("S3_BUCKET", "gads-citron-sagemaker-custom-stage")
-S3_PREFIX = os.environ.get("S3_PREFIX", "data/power_clk_collect/")
+S3_PREFIX = os.environ.get("S3_PREFIX", "data/occupation/power_clk_collect/")
 UPLOAD_TO_S3 = os.environ.get("UPLOAD_TO_S3", "1") == "1"
 s3_client = boto3.client("s3") if UPLOAD_TO_S3 else None
 #%% liste des sites IQ (ayant eau + elec)
