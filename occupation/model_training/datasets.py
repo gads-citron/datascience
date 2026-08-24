@@ -25,7 +25,7 @@ SAGE_ENV = False
 S3_BUCKET = os.environ.get("S3_BUCKET", "gads-citron-sagemaker-custom-stage")
 S3_PREFIX = "data/occupation/site_occupancy/"
 # donnée brute élec, produite par ground_truth_pipeline/feed_s3.py (mélange eau/élec, non filtré ici)
-POWER_S3_PREFIX = "data/power_clk_collect/"
+POWER_S3_PREFIX = "data/occupation/power_clk_collect/"
 # devices écartés par le filtre SVM (ground_truth_pipeline/Fusion_seasonalities.py)
 REJECTED_SVM_LOCAL = "../rejected_by_svm.csv"
 

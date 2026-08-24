@@ -63,9 +63,9 @@ def log_evaluation_run(model_type, model, artifacts, results, run_name, note=Non
             mlflow.log_text(results[table_name].to_csv(index=False), f"{table_name}.csv")
 
         if model_type == 'lightgbm':
-            mlflow.lightgbm.log_model(model, artifact_path="model")
+            mlflow.lightgbm.log_model(model, name="model")
         else:
-            mlflow.pytorch.log_model(model, artifact_path="model")
+            mlflow.pytorch.log_model(model, name="model")
 
         fig = plot_example(model_type, model, artifacts)
         mlflow.log_figure(fig, "prediction_example.png")

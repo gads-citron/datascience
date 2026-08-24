@@ -188,6 +188,7 @@ def plot_prediction_example(model, test_df, site_id=None, target_col='mean_occup
 
     y_true = site_df[target_col]
     y_pred = np.clip(model.predict(site_df[feature_cols]), 0, 1)
+    y_pred = np.where(site_df['raw_value'].isna(), np.nan, y_pred)
 
     fig, ax = plt.subplots(figsize=(14, 5))
     ax.plot(site_df['payload_timestamp'], y_true, label='vérité terrain')

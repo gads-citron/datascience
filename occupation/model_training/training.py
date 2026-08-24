@@ -45,6 +45,9 @@ def predict_lightgbm(model, df, target_col='mean_occupancy'):
     df = df.dropna(subset=[target_col])
     feature_cols = [c for c in df.columns if c not in (target_col, 'site_id', 'payload_timestamp')]
     y_pred = np.clip(model.predict(df[feature_cols]), 0, 1)
+    # pas de conso brute pour cette heure -> pas de prédiction fiable, on ne laisse pas LightGBM
+    # inventer une valeur à partir des seules features calendaires (cf. incident raw_value manquant)
+    y_pred = np.where(df['raw_value'].isna(), np.nan, y_pred)
     groups = df[['site_id', 'payload_timestamp']].reset_index(drop=True)
     return df[target_col].to_numpy(), y_pred, groups
 
