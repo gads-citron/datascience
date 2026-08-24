@@ -73,7 +73,8 @@ def log_evaluation_run(model_type, model, artifacts, results, run_name, note=Non
 
 
 def main():
-    train_df, test_df = build_train_test_datasets(preprocess='log_zscore')
+    preprocess = 'zscore'
+    train_df, test_df = build_train_test_datasets(preprocess=preprocess)
     model_type = 'lightgbm'  # ou 'lightgbm'
     model, artifacts = train_model(model_type, train_df, test_df)
 
@@ -83,7 +84,10 @@ def main():
     print(results['bias_by_hour'])
     print(results['fwhm_by_day'])
 
-    dataset_tags = {"dataset.n_sites_test": artifacts['test_df']['site_id'].nunique()}
+    dataset_tags = {
+        "dataset.n_sites_test": artifacts['test_df']['site_id'].nunique(),
+        "dataset.preprocess": preprocess,
+    }
     log_evaluation_run(
         model_type, model, artifacts, results,
         run_name=f"{model_type}_{datetime.now():%Y%m%d_%H%M%S}",

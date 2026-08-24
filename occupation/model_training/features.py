@@ -55,6 +55,12 @@ def preprocess_log_zscore(df):
     df['raw_value'] = (df['raw_value'] - grouped.transform('mean')) / grouped.transform('std')
     return df
 
+def preprocess_zscore(df):
+    # comme log_zscore mais sans log1p : évite d'écraser le haut de la distribution de conso
+    grouped = df.groupby('site_id')['raw_value']
+    df['raw_value'] = (df['raw_value'] - grouped.transform('mean')) / grouped.transform('std')
+    return df
+
 def preprocess_baseload_ratio(df, window=24 * 30, quantile=0.05):
     # exprime la conso relativement au baseload du bâtiment (percentile bas glissant, proche de la conso hors occupation)
     grouped = df.groupby('site_id')['raw_value']
@@ -66,6 +72,7 @@ def preprocess_baseload_ratio(df, window=24 * 30, quantile=0.05):
 PREPROCESSORS = {
     'none': preprocess_none,
     'log_zscore': preprocess_log_zscore,
+    'zscore': preprocess_zscore,
     'baseload_ratio': preprocess_baseload_ratio,
 }
 
