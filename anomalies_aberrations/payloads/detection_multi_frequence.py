@@ -4,6 +4,9 @@ import urllib.parse
 import clickhouse_connect
 import pandas as pd
 from dotenv import load_dotenv
+import numpy as np
+from scipy.signal import find_peaks
+from scipy.stats import gaussian_kde
 
 def db_connect():
     load_dotenv()
@@ -30,10 +33,16 @@ def detection(df, e=1):
     r = delta % T
     proportions = delta[r > 0].value_counts(normalize=True)
     proportions = proportions[proportions >= 0.2]
-    return proportions
+    if len(proportions) > 1:
+        if proportions.index.min() <= 5:
+            return proportions
+        if np.sum(proportions.index % proportions.index.min()) > 0:
+            return proportions
+    return []
 
 def main():
     to_check = [
+        ('6042702983c2f34ea421ffb9', '59c3be73bee9f849f51461d3'),
         ('67583e8f0fe5a964c753aa8f', '662bc1c93f0afb78ad05983d'),
         ('67447ea5ff9b1dc035478f2d', '662bc1c93f0afb78ad05983d'),
         ('67447ea5ff9b1dc035478f47', '662bc1c93f0afb78ad05983d'),
@@ -78,9 +87,9 @@ def main():
             print(f"Aucune donnée pour {device_id} / {sensor_id} entre {start} et {end}")
             continue
         periodes = detection(df)
-        if len(periodes) <= 1:
+        if len(periodes)==0:
             continue
-        if periodes.index.max() - periodes.index.min() < 3:
+        if periodes.index.max() - periodes.index.min() < 10:
             continue
         results.append({
             'device_id': device_id,
@@ -89,7 +98,7 @@ def main():
         })
 
     results_df = pd.DataFrame(results, columns=['device_id', 'sensor_id', 'periodes'])
-    results_df.to_csv("./pdm_multi_freq.csv")
+    # results_df.to_csv("./pdm_multi_freq.csv")
     print(results_df)
 
 if __name__ == "__main__":

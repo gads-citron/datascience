@@ -1,15 +1,20 @@
+import os
+import sys
+
 import numpy as np
 import pandas as pd
 import ruptures as rpt
 import plotly.graph_objects as go
-from db_connector import ClickHouseClient
 from tqdm import tqdm
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from db_connector import ClickHouseClient
 
 client = ClickHouseClient()
 WINDOW = 4
-SOURCE_VT = './data/sample_anomalies_IQ_2026/verite_terrain_IQ_2026.csv'
-# SOURCE_VT = './data/sample_anomalies_2026_trim_1/verite_terrain.csv'
-SOURCE_ANOMALIES_ALL = '../anomalies_all.csv'
+SOURCE_VT = os.path.join(os.path.dirname(__file__), 'data', 'sample_anomalies_IQ_2026', 'verite_terrain_IQ_2026.csv')
+# SOURCE_VT = os.path.join(os.path.dirname(__file__), 'data', 'sample_anomalies_2026_trim_1', 'verite_terrain.csv')
+SOURCE_ANOMALIES_ALL = os.path.join(os.path.dirname(__file__), 'anomalies_all.csv')
 PEN = 0.01  # pénalité PELT (modèle "l2" sur le signal log10) : plus elle est haute, moins il y a de ruptures détectées
 MIN_RATIO = 5.  # si défini (float) : une rupture n'est gardée que si elle passe le test défini par RATIO_BASIS ; si None, aucun filtre, toutes les ruptures trouvées par PELT sont gardées
 RATIO_BASIS = 'level'  # 'level' : after_mean >= MIN_RATIO x before_mean (comportement historique, adapté à un baseline proche de 0) ; 'step' : (after_mean - before_mean) >= MIN_RATIO x incrément typique (médiane des |diff|) du segment précédent (adapté à un saut sur un signal déjà loin de 0, mais confond pente et bruit) ; 'trend' : compare le saut réel à ce qu'on obtiendrait en extrapolant la pente du segment précédent, normalisé par le bruit résiduel autour de cette pente (distingue une vraie marche d'une simple continuation de tendance)
@@ -19,7 +24,7 @@ APPLY_LOG = True  # True : applique une compression log10 (signée si CLIP_NEGAT
 MIN_SIZE = 2  # nombre minimum de points entre deux ruptures PELT (168 = 1 semaine en données horaires) ; empêche PELT de découper une pente douce en plein de petits segments
 INTERPOLATE_MISSING = False  # True : comble les trous internes (valeurs manquantes) par interpolation linéaire avant détection ; False : les lignes manquantes sont simplement ignorées (comportement historique)
 LINEAR_OUTLIER_THRESHOLD = 10  # un point est marqué aberrant si son résidu au modèle linéaire dépasse LINEAR_OUTLIER_THRESHOLD x la MAD des résidus
-SAMPLE = 2  # anomalies IQ 2025 ; 2 = anomalies ss_comptage 2025
+SAMPLE = 1  # anomalies IQ 2025 ; 2 = anomalies ss_comptage 2025
 
 def query_serie_subcounting(dev_id, sens_id, start, end, smoothing_hours=SMOOTHING_HOURS):
     dataset = 'datamart_sous_comptage.distributed_dataset_hourly_payloads_merged'
@@ -190,6 +195,8 @@ if __name__ == "__main__":
 
     ruptures_found = []
     for i, (dev_id, sens_id) in tqdm(enumerate(pairs, start=1)):
+        print(dev_id, sens_id)
+        continue
         df = client.query(query_serie_subcounting(dev_id, sens_id, start, end))
         if df.empty:
             continue
@@ -201,7 +208,7 @@ if __name__ == "__main__":
         df['is_rupture_start'] = detect_changepoints(df_cleaned)
         # if df.loc[df['is_rupture_start']].empty:
         #     continue
-        # plot_changepoints(df, f"{dev_id} / {sens_id}")
+        plot_changepoints(df, f"{dev_id} / {sens_id}")
         ruptures_found.append(
             df.loc[df['is_rupture_start'], ['device_id', 'sensor_id', 'payload_expected_time']]
             .rename(columns={'payload_expected_time': 'anomaly_date'})
