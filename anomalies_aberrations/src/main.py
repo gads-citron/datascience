@@ -64,8 +64,8 @@ def main(dev_id, sens_id, start, end):
 
     result = finalize_anomalies(anomalies, patrimonial_df)
     if not result.empty:
-        Writer(client).write(result, OUT_TABLE)
-    return result
+        print(Writer(client).write(result, OUT_TABLE))
+        print('write done')
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -74,4 +74,4 @@ if __name__ == "__main__":
     parser.add_argument("--start", required=True, help="Start datetime (e.g. 2026-01-01 00:00:00)")
     parser.add_argument("--end", required=True, help="End datetime (e.g. 2026-01-31 23:59:59)")
     args = parser.parse_args()
-    print(main(args.device_id, args.sensor_id, args.start, args.end))
+    main(args.device_id, args.sensor_id, args.start, args.end)
