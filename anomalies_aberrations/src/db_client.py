@@ -49,7 +49,7 @@ class Collector:
 
     def query_serie(self, dev_id, sens_id, start, end):
         # dataset = 'datawarehouse_prod.fact_payload'
-        dataset = 'datawarehouse_stage_fact_payload'
+        dataset = 'datawarehouse_stage.fact_payload'
         q = f"""SELECT
             device_id,
             payload_metric_id AS sensor_id,
