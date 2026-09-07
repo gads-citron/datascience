@@ -21,7 +21,7 @@ RATIO_BASIS = 'level'  # 'level' : after_mean >= MIN_RATIO x before_mean (compor
 SMOOTHING_HOURS = 0  # nombre d'heures précédentes utilisées pour lisser le signal avant détection ; mettre à 0 pour désactiver le lissage
 CLIP_NEGATIVE = True  # True : ramène les valeurs négatives à 0 avant transformation (comportement historique) ; False : conserve les valeurs négatives telles quelles
 APPLY_LOG = True  # True : applique une compression log10 (signée si CLIP_NEGATIVE=False, pour rester définie sur les négatifs) ; False : pas de transformation logarithmique
-MIN_SIZE = 2  # nombre minimum de points entre deux ruptures PELT (168 = 1 semaine en données horaires) ; empêche PELT de découper une pente douce en plein de petits segments
+MIN_SIZE = 24  # nombre minimum de points entre deux ruptures PELT (168 = 1 semaine en données horaires) ; empêche PELT de découper une pente douce en plein de petits segments
 INTERPOLATE_MISSING = False  # True : comble les trous internes (valeurs manquantes) par interpolation linéaire avant détection ; False : les lignes manquantes sont simplement ignorées (comportement historique)
 LINEAR_OUTLIER_THRESHOLD = 10  # un point est marqué aberrant si son résidu au modèle linéaire dépasse LINEAR_OUTLIER_THRESHOLD x la MAD des résidus
 SAMPLE = 1  # anomalies IQ 2025 ; 2 = anomalies ss_comptage 2025
