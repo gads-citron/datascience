@@ -42,19 +42,19 @@ def main(site_id, start, end):
         for (device_id, sensor_id), df in sample.groupby(['device_id', 'sensor_id']):
             anomalies.extend(dt.find_anomalies(df))
             n_pairs += 1
-        loop_duration = time.perf_counter() - loop_start
-        avg_per_pair = loop_duration / n_pairs if n_pairs else 0
-        result = finalize_anomalies(anomalies, pairs)
-        logger.info(f"Détection terminée pour le site {pairs.site_name.unique()[0]}, \
-                    client {pairs.customer_account_name.unique()[0]} : {len(result)} anomalies détectées")
-        logger.info(
-            "Temps d'exécution total : %.2fs (%d paires device_id/sensor_id, %.3fs/paire en moyenne)",
-            time.perf_counter() - run_start, n_pairs, avg_per_pair,
-        )
-        if not result.empty:
-            write_status = Writer(client).write(result, OUT_TABLE)
-            logger.info("Écriture dans %s : %s", OUT_TABLE, "succès" if write_status else "échec")
-            return write_status
+            loop_duration = time.perf_counter() - loop_start
+            avg_per_pair = loop_duration / n_pairs if n_pairs else 0
+            result = finalize_anomalies(anomalies, pairs)
+            logger.info(f"Détection terminée pour le site {pairs.site_name.unique()[0]}, \
+                        client {pairs.customer_account_name.unique()[0]} : {len(result)} anomalies détectées")
+            logger.info(
+                "Temps d'exécution total : %.2fs (%d paires device_id/sensor_id, %.3fs/paire en moyenne)",
+                time.perf_counter() - run_start, n_pairs, avg_per_pair,
+            )
+            if not result.empty:
+                write_status = Writer(client).write(result, OUT_TABLE)
+                logger.info("Écriture dans %s : %s", OUT_TABLE, "succès" if write_status else "échec")
+                return write_status
     except Exception:
         logger.exception(f"Erreur pendant le traitement site_id={site_id} start={start} end={end}")
         raise
