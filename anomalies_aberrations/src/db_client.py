@@ -48,7 +48,7 @@ class Collector:
         self.client = client
 
     def query_serie(self, dev_id, sens_id, start, end):
-        dataset = 'datawarehouse_stage_fact_payload'
+        dataset = 'datawarehouse_stage.fact_payload'
         # dataset = 'datawarehouse_prod.fact_payload'
         q = f"""SELECT
             device_id,
@@ -74,7 +74,7 @@ class Collector:
         return query
 
     def query_by_site(self, pairs_df, start, end):
-        dataset = 'datawarehouse_stage_fact_payload'
+        dataset = 'datawarehouse_stage.fact_payload'
         # dataset = 'datawarehouse_prod.fact_payload'
         device_ids = "','".join(pairs_df['device_id'].unique())
         sensor_ids = "','".join(pairs_df['sensor_id'].unique())
@@ -88,7 +88,7 @@ class Collector:
         return query
 
     def get_first_payload(self, dev_id, sens_id):
-        dataset = 'datawarehouse_stage_fact_payload'
+        dataset = 'datawarehouse_stage.fact_payload'
         # dataset = 'datawarehouse_prod.fact_payload'
         q = f"""SELECT min(payload_timestamp)            
                 FROM {dataset} AS fp
