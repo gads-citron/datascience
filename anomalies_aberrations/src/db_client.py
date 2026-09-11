@@ -48,8 +48,8 @@ class Collector:
         self.client = client
 
     def query_serie(self, dev_id, sens_id, start, end):
+        dataset = 'datawarehouse_stage_fact_payload'
         # dataset = 'datawarehouse_prod.fact_payload'
-        dataset = 'datawarehouse_stage.fact_payload'
         q = f"""SELECT
             device_id,
             payload_metric_id AS sensor_id,
@@ -63,14 +63,29 @@ class Collector:
         ORDER BY fp.payload_timestamp;"""
         return self.client.query(q)
 
-    def patrimonial(self, dev_id, sens_id):
+    def get_site_pairs(self, site_id):
         dataset = 'datamart_sous_comptage.device_properties'
-        q = f"""SELECT distinct customer_account_name, site_name, site_id,
-            device_name, device_id, sensor_name, sensor_id
-            FROM {dataset}
-            WHERE device_id = '{dev_id}'
-            AND sensor_id = '{sens_id}'"""
-        return self.client.query(q)
+        query = f"""SELECT DISTINCT customer_account_name, site_name, site_id, device_id, device_name, sensor_id, sensor_name
+        FROM {dataset}
+        WHERE site_id = '{site_id}'
+        AND lower(device_type) LIKE '%lectr%'
+        AND lower(sensor_name) LIKE '%index%'
+        AND lower(sensor_name) NOT LIKE '%(cons)%'"""
+        return query
+
+    def query_by_site(self, pairs_df, start, end):
+        dataset = 'datawarehouse_stage_fact_payload'
+        # dataset = 'datawarehouse_prod.fact_payload'
+        device_ids = "','".join(pairs_df['device_id'].unique())
+        sensor_ids = "','".join(pairs_df['sensor_id'].unique())
+        query = f"""SELECT device_id, payload_metric_id AS sensor_id, payload_timestamp,
+            toFloat32OrNull(payload_value) AS raw_value
+        FROM {dataset}
+        WHERE payload_metric_id IN ('{sensor_ids}')
+        AND device_id IN ('{device_ids}')
+        AND payload_timestamp BETWEEN '{start}' AND '{end}'
+        ORDER BY payload_timestamp;"""
+        return query
 
     def get_first_payload(self, dev_id, sens_id):
         dataset = 'datawarehouse_stage_fact_payload'
@@ -80,7 +95,6 @@ class Collector:
                 WHERE fp.device_id = '{dev_id}'
                 AND fp.payload_metric_id = '{sens_id}'"""
         return self.client.query(q)
-
 
 class Writer:
     def __init__(self, client):
