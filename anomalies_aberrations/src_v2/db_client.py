@@ -77,7 +77,7 @@ class Collector:
     def get_first_payload(self, dev, sens):
         table = 'datawarehouse_stage.fact_payload'
         # dataset = 'datawarehouse_prod.fact_payload'
-        q = f"""SELECT min(payload_timestamp)
+        q = f"""SELECT minOrNull(payload_timestamp)
                 FROM {table} AS fp
                 WHERE fp.device_id = '{dev}'
                 AND fp.payload_metric_id = '{sens}'
