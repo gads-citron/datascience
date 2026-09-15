@@ -1,5 +1,6 @@
 import logging
 import time
+from datetime import datetime
 from db_client import ClickHouseClient as clk
 from db_client import Collector
 from db_client import Writer
@@ -13,18 +14,19 @@ logger.setLevel(logging.INFO)
 
 # PUNCTUAL_TYPES = {'commissioning', 'reset', 'is_null', 'rupture'}
 FINAL_COLUMNS = ['customer_account_name', 'site_name', 'site_id', 'device_name', 'device_id',
-                  'sensor_name', 'sensor_id', 'anomaly_type', 'date_start', 'date_stop']
+                  'sensor_name', 'sensor_id', 'anomaly_type', 'payload_timestamp', 'run_date']
 
-def finalize_anomalies(anomalies, patrimonial_df):
+def finalize_anomalies(anomalies, patrimonial_df, run_date):
     if not anomalies:
         return pd.DataFrame(columns=FINAL_COLUMNS)
     df = pd.concat(anomalies, ignore_index=True)
-    df = df.rename(columns={'date_end': 'date_stop'})
     df = df.merge(patrimonial_df, on=['device_id', 'sensor_id'], how='left')
+    df['run_date'] = run_date
     return df[FINAL_COLUMNS]
 
 def main(site_id, start, end):
     logger.info("Treatment starting ... site_id=%s start=%s end=%s", site_id, start, end)
+    run_date = datetime.now()
     run_start = time.perf_counter()
     try:
         anomalies = []
@@ -45,7 +47,7 @@ def main(site_id, start, end):
             n_pairs += 1
         loop_duration = time.perf_counter() - loop_start
         avg_per_pair = loop_duration / n_pairs if n_pairs else 0
-        result = finalize_anomalies(anomalies, pairs)
+        result = finalize_anomalies(anomalies, pairs, run_date)
         logger.info(f"Détection terminée pour le site {pairs.site_name.unique()[0]}, \
                     client {pairs.customer_account_name.unique()[0]} : {len(result)} anomalies détectées")
         logger.info(
