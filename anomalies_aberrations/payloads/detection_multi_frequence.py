@@ -8,6 +8,9 @@ import numpy as np
 from scipy.signal import find_peaks
 from scipy.stats import gaussian_kde
 
+START = '2025-01-01 00:00:00'
+END = '2025-12-31 23:59:59'
+
 def db_connect():
     load_dotenv()
     host = urllib.parse.quote_plus(os.environ.get("clk_prod"))
@@ -26,23 +29,9 @@ def query_serie(dev_id, sens_id, start, end):
     AND fp.payload_timestamp BETWEEN '{start}' AND '{end}'
     ORDER BY fp.payload_timestamp;"""
     return query
-
-def detection(df, e=1):
-    delta = df['ts'].diff()
-    T = delta.median()
-    r = delta % T
-    proportions = delta[r > 0].value_counts(normalize=True)
-    proportions = proportions[proportions >= 0.2]
-    if len(proportions) > 1:
-        if proportions.index.min() <= 5:
-            return proportions
-        if np.sum(proportions.index % proportions.index.min()) > 0:
-            return proportions
-    return []
-
-def main():
-    to_check = [
-        ('6042702983c2f34ea421ffb9', '59c3be73bee9f849f51461d3'),
+    
+def manual_pairs():
+    return [('6042702983c2f34ea421ffb9', '59c3be73bee9f849f51461d3'),
         ('67583e8f0fe5a964c753aa8f', '662bc1c93f0afb78ad05983d'),
         ('67447ea5ff9b1dc035478f2d', '662bc1c93f0afb78ad05983d'),
         ('67447ea5ff9b1dc035478f47', '662bc1c93f0afb78ad05983d'),
@@ -74,17 +63,29 @@ def main():
         ('67583e8e0fe5a964c753aa21', '662bc1c93f0afb78ad05983d'),
         ('67583e8f0fe5a964c753aa8d', '662bc1c93f0afb78ad05983d'),
         ('67583e8f0fe5a964c753aa8a', '662bc1c93f0afb78ad05983d'),
-        ('684aee4fb808d8009572da31', '6454b98a0dae31f561c6f69a'),
-    ]
-    start = '2025-01-01 00:00:00'
-    end = '2025-12-31 23:59:59'
+        ('684aee4fb808d8009572da31', '6454b98a0dae31f561c6f69a')]
 
+def detection(df, e=1):
+    delta = df['ts'].diff()
+    T = delta.median()
+    r = delta % T
+    proportions = delta[r > 0].value_counts(normalize=True)
+    proportions = proportions[proportions >= 0.2]
+    if len(proportions) > 1:
+        if proportions.index.min() <= 5:
+            return proportions
+        if np.sum(proportions.index % proportions.index.min()) > 0:
+            return proportions
+    return []
+
+def main():
+    to_check = manual_pairs()
     client = db_connect()
     results = []
     for device_id, sensor_id in to_check:
-        df = client.query_df(query_serie(device_id, sensor_id, start, end))
+        df = client.query_df(query_serie(device_id, sensor_id, START, END))
         if df.empty:
-            print(f"Aucune donnée pour {device_id} / {sensor_id} entre {start} et {end}")
+            print(f"Aucune donnée pour {device_id} / {sensor_id} entre {START} et {END}")
             continue
         periodes = detection(df)
         if len(periodes)==0:
