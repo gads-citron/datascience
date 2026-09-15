@@ -61,18 +61,22 @@ def rupture_detection_model(df, model):
 
 def find_anomalies(sample, model):
     anom_df = []
-    start = sample.payload_timestamp.min()
-    end = sample.payload_timestamp.max()
     null_val = null_ranges(sample)
     anom_df.append(sample.loc[null_val, ['device_id', 'sensor_id', 'payload_timestamp', 'raw_value']]\
-                                    .assign(anomaly_type='is_null', date_start=start, date_end=end))
+                                    .assign(anomaly_type='is_null',
+                                            date_start=lambda d: d['payload_timestamp'],
+                                            date_end=lambda d: d['payload_timestamp']))
     sample = sample.loc[~null_val]
     reset_cpt = reset_compteurs(sample)
     anom_df.append(sample.loc[reset_cpt, ['device_id', 'sensor_id', 'payload_timestamp', 'raw_value']]\
-                                    .assign(anomaly_type='reset', date_start=start, date_end=end))
+                                    .assign(anomaly_type='reset',
+                                            date_start=lambda d: d['payload_timestamp'],
+                                            date_end=lambda d: d['payload_timestamp']))
     is_rupture = rupture_detection_model(sample, model)
     anom_df.append(sample.loc[is_rupture, ['device_id', 'sensor_id', 'payload_timestamp', 'raw_value']]\
-                                    .assign(anomaly_type='rupture', date_start=start, date_end=end))
+                                    .assign(anomaly_type='rupture',
+                                            date_start=lambda d: d['payload_timestamp'],
+                                            date_end=lambda d: d['payload_timestamp']))
     return anom_df
 
 #-----# Deprecated for now
