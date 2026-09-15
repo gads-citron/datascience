@@ -76,20 +76,20 @@ class FeatureBuilder:
         return X, y
 
     def build_features(self, series, pos):
-        """Calcule les features autour de la position pos (index de ligne dans series) :
-        - valeur (payload_value) en t, t-1, ..., t-W
+        """Calcule les features autour de la position pos (index de ligne dans series), toutes
+        invariantes à l'échelle du compteur (aucune valeur absolue de payload_value, seulement des
+        écarts et des ratios) :
         - delta_t (écart en secondes avec le point précédent) en t, t-1, ..., t-W
         - delta_v (écart de valeur avec le point précédent) en t, t-1, ..., t-W
         - médiane de delta_t sur les T points avant pos
-        - moyenne quadratique des valeurs entre t-1 et t-M
-        - moyenne quadratique des valeurs entre t et t-M
+        - jump_ratio : variation relative de la moyenne quadratique de la valeur entre la fenêtre
+          [t-M, t-1] et [t-M, t] (remplace les moyennes quadratiques brutes, sensibles à l'échelle)
         """
         features = {}
         for lag in range(self.w + 1):
             idx = pos - lag
             valid = idx >= 0
             suffix = 't' if lag == 0 else f't-{lag}'
-            features[f'value_{suffix}'] = series['raw_value'].iloc[idx] if valid else np.nan
             features[f'delta_t_{suffix}'] = series['time_delta_seconds'].iloc[idx] if valid else np.nan
             features[f'delta_v_{suffix}'] = series['value_diff'].iloc[idx] if valid else np.nan
 
@@ -97,10 +97,10 @@ class FeatureBuilder:
         features['delta_t_median'] = delta_t_window.median() if len(delta_t_window) else np.nan
 
         value_prev = series['raw_value'].iloc[max(0, pos - self.m):pos]
-        features['value_rms_prev'] = np.sqrt((value_prev ** 2).mean()) if len(value_prev) else np.nan
-
         value_curr = series['raw_value'].iloc[max(0, pos - self.m):pos + 1]
-        features['value_rms_curr'] = np.sqrt((value_curr ** 2).mean()) if len(value_curr) else np.nan
+        rms_prev = np.sqrt((value_prev ** 2).mean()) if len(value_prev) else np.nan
+        rms_curr = np.sqrt((value_curr ** 2).mean()) if len(value_curr) else np.nan
+        features['jump_ratio'] = (rms_curr - rms_prev) / (abs(rms_prev) + 1e-6) if pd.notna(rms_prev) else np.nan
 
         return features
 

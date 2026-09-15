@@ -11,8 +11,16 @@ def load():
     model = joblib.load(MODEL_PATH)
     return model
 
-def null_ranges(df):
-    return df["raw_value"].eq(0)
+def null_ranges(df, dev, sens, col):
+    """Un compteur à 0 avant son premier payload non nul est un état normal (pas encore mis en
+    service) ; après cette date, c'est une anomalie. Renvoie un masque booléen aligné sur df."""
+    result = col.get_first_payload(dev, sens)
+    date_first_payload = result.iloc[0, 0] if not result.empty else None
+    if date_first_payload is None or pd.isna(date_first_payload):
+        return pd.Series(False, index=df.index)
+    is_null = df['raw_value'].eq(0)
+    is_after = df['payload_timestamp'] > date_first_payload
+    return is_null & is_after
 
 def reset_compteurs(df):
     is_reset = df['raw_value'].diff() < 0
@@ -20,13 +28,13 @@ def reset_compteurs(df):
 
 def build_features_vectorized(series, w=p.W, t=p.T, m=p.M):
     """Version vectorisée de FeatureBuilder.build_features (training.py), appliquée à toute la
-    série en une fois plutôt que ligne par ligne : les features de lag ne sont que des shift()
-    sur les colonnes déjà calculées (raw_value, time_delta_seconds, value_diff), et les agrégats
-    (médiane, moyenne quadratique) des rolling — même sémantique de fenêtre, en vectorisé."""
+    série en une fois plutôt que ligne par ligne. Toutes les features sont invariantes à l'échelle
+    du compteur (aucune valeur absolue de payload_value) : les features de lag ne sont que des
+    shift() sur les colonnes déjà calculées (time_delta_seconds, value_diff), et le saut de valeur
+    est exprimé en variation relative (jump_ratio) plutôt qu'en moyenne quadratique brute."""
     features = pd.DataFrame(index=series.index)
     for lag in range(w + 1):
         suffix = 't' if lag == 0 else f't-{lag}'
-        features[f'value_{suffix}'] = series['raw_value'].shift(lag)
         features[f'delta_t_{suffix}'] = series['time_delta_seconds'].shift(lag)
         features[f'delta_v_{suffix}'] = series['value_diff'].shift(lag)
 
@@ -35,9 +43,11 @@ def build_features_vectorized(series, w=p.W, t=p.T, m=p.M):
 
     sq_value = series['raw_value'] ** 2
     # moyenne quadratique entre t-1 et t-M (fenêtre décalée d'1, pos exclu)
-    features['value_rms_prev'] = np.sqrt(sq_value.rolling(window=m, min_periods=1).mean()).shift(1)
+    rms_prev = np.sqrt(sq_value.rolling(window=m, min_periods=1).mean()).shift(1)
     # moyenne quadratique entre t et t-M (pos inclus)
-    features['value_rms_curr'] = np.sqrt(sq_value.rolling(window=m + 1, min_periods=1).mean())
+    rms_curr = np.sqrt(sq_value.rolling(window=m + 1, min_periods=1).mean())
+    # variation relative entre les deux fenêtres, invariante à l'échelle du compteur
+    features['jump_ratio'] = (rms_curr - rms_prev) / (rms_prev.abs() + 1e-6)
 
     return features
 
@@ -59,9 +69,9 @@ def rupture_detection_model(df, model):
     is_rupture.loc[series.index[predictions == 1]] = True
     return is_rupture
 
-def find_anomalies(sample, model):
+def find_anomalies(sample, model, dev, sens, col):
     anom_df = []
-    null_val = null_ranges(sample)
+    null_val = null_ranges(sample, dev, sens, col)
     anom_df.append(sample.loc[null_val, ['device_id', 'sensor_id', 'payload_timestamp', 'raw_value']]\
                                     .assign(anomaly_type='is_null',
                                             date_start=lambda d: d['payload_timestamp'],
@@ -78,59 +88,3 @@ def find_anomalies(sample, model):
                                             date_start=lambda d: d['payload_timestamp'],
                                             date_end=lambda d: d['payload_timestamp']))
     return anom_df
-
-#-----# Deprecated for now
-def commissioning(df, start):
-    valid = df.dropna(subset=['raw_value'])
-    valid = valid[valid['raw_value'] != 0]
-    empty_result = pd.DataFrame(columns=['device_id', 'sensor_id', 'ts', 'raw_value', 'anomaly_type', 'date', 'segment_start', 'segment_end'])
-    if valid.empty:
-        return empty_result
-
-    first = valid.iloc[0]
-    date = pd.to_datetime(first['ts'], unit='s', utc=True).tz_convert('Europe/Paris')
-    if date.date() == pd.Timestamp(start).date():
-        return empty_result
-    return pd.DataFrame([{
-        'device_id': first['device_id'],
-        'sensor_id': first['sensor_id'],
-        'ts': first['ts'],
-        'raw_value': first['raw_value'],
-        'anomaly_type': 'commissioning',
-        'date': date,
-        'segment_start': date,
-        'segment_end': date,
-    }])
-
-def multi_freq_detection(df, e=1):
-    delta = df['ts'].diff()
-    T = delta.median()
-    r = delta % T
-    proportions = delta[r > 0].value_counts(normalize=True)
-    proportions = proportions[proportions >= 0.2]
-    if len(proportions) > 1:
-        if proportions.index.min() <= 5:
-            return proportions
-        if np.sum(proportions.index % proportions.index.min()) > 0:
-            return proportions
-    return []
-
-def multi_frequence(df, start, end):
-    periodes = multi_freq_detection(df)
-    res = pd.DataFrame(columns=['device_id', 'sensor_id', 'ts',
-                                'raw_value', 'anomaly_type', 'date',
-                                'segment_start', 'segment_end'])
-    if len(periodes) > 1 and periodes.index.max() - periodes.index.min() > 10:
-        start_ts = pd.Timestamp(start).tz_localize('Europe/Paris')
-        end_ts = pd.Timestamp(end).tz_localize('Europe/Paris')
-        res = pd.DataFrame([{
-            'device_id': df['device_id'].iloc[0],
-            'sensor_id': df['sensor_id'].iloc[0],
-            'ts': np.nan,
-            'raw_value': np.nan,
-            'anomaly_type': 'multi-freq',
-            'date': start_ts,
-            'segment_start': start_ts,
-            'segment_end': end_ts,
-        }])
-    return res

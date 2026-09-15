@@ -41,7 +41,7 @@ def main(site_id, start, end):
         n_pairs = 0
         loop_start = time.perf_counter()
         for (device_id, sensor_id), df in sample.groupby(['device_id', 'sensor_id']):
-            anomalies.extend(dt.find_anomalies(df, model))
+            anomalies.extend(dt.find_anomalies(df, model, device_id, sensor_id, col))
             n_pairs += 1
         loop_duration = time.perf_counter() - loop_start
         avg_per_pair = loop_duration / n_pairs if n_pairs else 0
