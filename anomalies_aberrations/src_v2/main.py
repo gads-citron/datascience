@@ -6,11 +6,11 @@ from db_client import Writer
 import detector as dt
 import argparse
 import pandas as pd
+import param as p
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-OUT_TABLE = 'Myriam_test.sous_comptage_anomalies_v2'
 # PUNCTUAL_TYPES = {'commissioning', 'reset', 'is_null', 'rupture'}
 FINAL_COLUMNS = ['customer_account_name', 'site_name', 'site_id', 'device_name', 'device_id',
                   'sensor_name', 'sensor_id', 'anomaly_type', 'date_start', 'date_stop']
@@ -53,8 +53,8 @@ def main(site_id, start, end):
             time.perf_counter() - run_start, n_pairs, avg_per_pair,
         )
         if not result.empty:
-            write_status = Writer(client).write(result, OUT_TABLE)
-            logger.info("Écriture dans %s : %s", OUT_TABLE, "succès" if write_status else "échec")
+            write_status = Writer(client).write(result, p.OUT_TABLE)
+            logger.info("Écriture dans %s : %s", p.OUT_TABLE, "succès" if write_status else "échec")
             return write_status
     except Exception:
         logger.exception(f"Erreur pendant le traitement site_id={site_id} start={start} end={end}")
