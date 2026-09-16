@@ -123,8 +123,8 @@ def main():
                     "et sauvegarde la prédiction (0 ou 1) pour chaque payload_timestamp.")
     parser.add_argument('--device_id', required=True)
     parser.add_argument('--sensor_id', required=True)
-    parser.add_argument('--start', required=True, help="Date de début, ex: '2026-01-01 00:00:00'")
-    parser.add_argument('--end', required=True, help="Date de fin, ex: '2026-09-10 23:59:59'")
+    parser.add_argument('--start', default = '2026-01-01 00:00:00', help="Date de début, ex: '2026-01-01 00:00:00'")
+    parser.add_argument('--end', default = '2026-09-10 00:00:00', help="Date de fin, ex: '2026-09-10 23:59:59'")
     parser.add_argument('--output', default=OUTPUT_PATH)
     args = parser.parse_args()
 
