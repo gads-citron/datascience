@@ -16,12 +16,12 @@ import sys
 import pandas as pd
 import plotly.express as px
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
 from db_connector import ClickHouseClient
 
 MIN_GAP_ROWS = 5  # écart minimum (en nombre de lignes) entre deux ruptures
 MAX_GAP_ROWS = 10000  # écart maximum (en nombre de lignes) entre deux ruptures
-MIN_JUMP = 100  # saut minimum appliqué à une rupture
+MIN_JUMP = 1000  # saut minimum appliqué à une rupture
 MAX_JUMP = 1e4  # saut maximum appliqué à une rupture
 MIN_NEG = 5  # nombre minimum de négatifs (simple sampling, label=0) tirés par couple device/sensor
 MAX_NEG = 10  # nombre maximum de négatifs (simple sampling, label=0) tirés par couple device/sensor
@@ -30,11 +30,13 @@ VT_OUTPUT_PATH = os.path.join(OUTPUT_DIR, 'verite_terrain.csv')  # vérité terr
 N_SITES = 20
 MIN_SITE_GAP = 2  # écart minimum (en position dans le fichier) entre deux sites choisis, pour ne jamais en prendre deux qui se suivent
 
-PAIRS_SOURCE_PATH = os.path.join(os.path.dirname(__file__), '..', 'device_sensor_index_pairs.csv')
+PAIRS_SOURCE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'utils', 'data', 'device_sensor_index_pairs.csv')
 INDEX_SENSOR_IDS = ['59c3be73bee9f849f51461d3', '61669dcf81278b679e1bc513',
                     '61669de581278b679e1bc514', '61669df381278b679e1bc515',
                     '61669e0081278b679e1bc516', '662bc1c93f0afb78ad05983d',
                     '662bc1c9db23311c9b7fea25']
+TARGET_CUSTOMER_ACCOUNTS = ['ENAC', 'Looping Experiences', 'ISAE - SUPAERO',
+                             "Mairie d'Argenteuil", 'ESSET', 'Réseau ETE - Nouvelle Aquitaine']
 
 def query_serie(device_id, sensor_id, start, end):
     dataset = 'datawarehouse_prod.fact_payload'
@@ -119,45 +121,72 @@ def sample_negative_timestamps(device_id, sensor_id, positive_timestamps):
         return []
     return available.sample(n=n).tolist()
 
+def pick_spaced_positions(n_positions, n_sites, min_gap=MIN_SITE_GAP):
+    """Tire n_sites positions parmi range(n_positions), en essayant de les espacer d'au
+    moins min_gap. Si la contrainte d'écart ne permet pas d'en trouver assez (vivier trop
+    petit), on complète sans contrainte plutôt que de renvoyer moins de sites."""
+    positions = list(range(n_positions))
+    random.shuffle(positions)
+    selected = []
+    for pos in positions:
+        if len(selected) == n_sites:
+            break
+        if all(abs(pos - other) >= min_gap for other in selected):
+            selected.append(pos)
+    if len(selected) < n_sites:
+        remaining = [pos for pos in positions if pos not in set(selected)]
+        fill = remaining[:n_sites - len(selected)]
+        if fill:
+            print(f"Contrainte d'écart min_gap={min_gap} non tenable : {len(fill)} site(s) "
+                  f"ajouté(s) sans contrainte d'espacement")
+        selected.extend(fill)
+    return selected
+
 def select_random_pairs(pairs_path=PAIRS_SOURCE_PATH, sensor_ids=INDEX_SENSOR_IDS,
+                         customer_account_names=TARGET_CUSTOMER_ACCOUNTS,
                          n_sites=N_SITES, min_gap=MIN_SITE_GAP, vt_path=VT_OUTPUT_PATH):
     """Sélectionne au hasard n_sites sites, piochés un peu partout dans device_sensor_index_pairs
-    (jamais deux sites qui se suivent dans le fichier, pour ne pas tomber deux fois sur le même
-    client), écarte ceux déjà présents dans Myriam_test.sous_comptage_anomalies ainsi que ceux déjà
-    traités lors d'un run précédent (retrouvés via vt_path), puis tire un couple device_id/sensor_id
-    au hasard par site retenu. Renvoie la liste finale de couples."""
+    (en évitant autant que possible deux sites qui se suivent dans le fichier, pour ne pas tomber
+    deux fois sur le même client), parmi les couples appartenant à customer_account_names. Les sites
+    déjà présents dans Myriam_test.sous_comptage_anomalies et ceux déjà traités lors d'un run
+    précédent (retrouvés via vt_path) sont écartés AVANT le tirage, pour que le tirage porte bien sur
+    n_sites sites utilisables. Puis tire un couple device_id/sensor_id au hasard par site retenu."""
     pairs_df = pd.read_csv(pairs_path, dtype=str)
     pairs_df = pairs_df[pairs_df['site_id'].notna() & (pairs_df['site_id'] != '')]
+    print(f"Vivier : {pairs_df['site_id'].nunique()} site(s) dans {os.path.basename(pairs_path)}")
     pairs_df = pairs_df[pairs_df['sensor_id'].isin(sensor_ids)]
+    print(f"  après filtre sensor_id (capteurs index) : {pairs_df['site_id'].nunique()} site(s)")
+    pairs_df = pairs_df[pairs_df['customer_account_name'].isin(customer_account_names)]
+    print(f"  après filtre customer_account_name : {pairs_df['site_id'].nunique()} site(s)")
 
     already_treated_sites = set()
     if os.path.exists(vt_path):
         treated_devices = pd.read_csv(vt_path, dtype=str)['device_id'].unique()
         already_treated_sites = set(pairs_df.loc[pairs_df['device_id'].isin(treated_devices), 'site_id'])
 
-    ordered_sites = [site_id for site_id in pairs_df['site_id'].drop_duplicates().tolist()
-                      if site_id not in already_treated_sites]
-
-    positions = list(range(len(ordered_sites)))
-    random.shuffle(positions)
-    selected_positions = []
-    for pos in positions:
-        if all(abs(pos - other) >= min_gap for other in selected_positions):
-            selected_positions.append(pos)
-        if len(selected_positions) == n_sites:
-            break
-    selected_sites = [ordered_sites[pos] for pos in selected_positions]
-
     client = ClickHouseClient('stage')
     existing = client.query("SELECT DISTINCT site_id FROM Myriam_test.sous_comptage_anomalies;")
     existing_sites = set(existing['site_id']) if not existing.empty else set()
-    selected_sites = [site_id for site_id in selected_sites if site_id not in existing_sites]
+
+    excluded_sites = already_treated_sites | existing_sites
+    ordered_sites = [site_id for site_id in pairs_df['site_id'].drop_duplicates().tolist()
+                      if site_id not in excluded_sites]
+    print(f"  après exclusion des runs précédents ({len(already_treated_sites)} via {os.path.basename(vt_path)}) "
+          f"et de sous_comptage_anomalies ({len(existing_sites)} site(s) en base) : "
+          f"{len(ordered_sites)} site(s) disponible(s)")
+
+    if len(ordered_sites) < n_sites:
+        print(f"ATTENTION : seulement {len(ordered_sites)} site(s) disponible(s) pour {n_sites} demandé(s)")
+
+    selected_positions = pick_spaced_positions(len(ordered_sites), n_sites, min_gap)
+    selected_sites = [ordered_sites[pos] for pos in selected_positions]
 
     result_pairs = []
     for site_id in selected_sites:
         site_rows = pairs_df[pairs_df['site_id'] == site_id]
         chosen = site_rows.sample(n=1).iloc[0]
         result_pairs.append((chosen['device_id'], chosen['sensor_id']))
+    print(f"{len(result_pairs)} couple(s) device/sensor sélectionné(s)")
     return result_pairs
 
 def plot_result(df, device_id, sensor_id):
@@ -198,14 +227,21 @@ def main():
                     "et sauvegarde le résultat en parquet dans ./data/ruptures/.")
     parser.add_argument('--start', required=True, help="Date de début, ex: '2026-01-01 00:00:00'")
     parser.add_argument('--end', required=True, help="Date de fin, ex: '2026-09-10 23:59:59'")
+    parser.add_argument('--n-sites', type=int, default=N_SITES,
+                        help=f"Nombre de sites à tirer (défaut: {N_SITES})")
     args = parser.parse_args()
-    pairs = select_random_pairs()
+    pairs = select_random_pairs(n_sites=args.n_sites)
     total_positives = 0
     total_negatives = 0
+    n_empty = 0
     for device_id, sensor_id in pairs:
         n_positive, n_negative = device_sensor_treat(device_id, sensor_id, args.start, args.end)
+        if n_positive == 0 and n_negative == 0:
+            n_empty += 1
         total_positives += n_positive
         total_negatives += n_negative
+    if n_empty:
+        print(f"{n_empty} couple(s) sans donnée sur la période {args.start} → {args.end}")
     total = total_positives + total_negatives
     if total == 0:
         print(f"Aucun exemple généré sur {len(pairs)} couple(s) device/sensor")
