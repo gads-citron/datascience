@@ -12,9 +12,9 @@ class ClickHouseClient:
         host, username, password = self.sage_secret(secret_name)
         # host, username, password = self.local_secret()
         self.client = clickhouse_connect.get_client(
-                        host=host, username=username, 
+                        host=host, username=username,
                         port=443, password=password)
-        
+
     def local_secret(self):
         load_dotenv()
         host = urllib.parse.quote_plus(os.environ.get("clk_prod"))
@@ -36,33 +36,20 @@ class ClickHouseClient:
         username = secret['username']
         password = secret['password']
         return host, username, password
-    
+
     def query(self, q):
         return self.client.query_df(q)
 
     def insert_df(self, table, df):
         return self.client.insert_df(table, df)
 
+    def command(self, q):
+        return self.client.command(q)
+
 class Collector:
     def __init__(self, client):
         self.client = client
-
-    def query_serie(self, dev_id, sens_id, start, end):
-        dataset = 'datawarehouse_stage.fact_payload'
-        # dataset = 'datawarehouse_prod.fact_payload'
-        q = f"""SELECT
-            device_id,
-            payload_metric_id AS sensor_id,
-            toUnixTimestamp(fp.payload_timestamp) AS ts,
-            payload_timestamp,
-            toFloat32OrNull(fp.payload_value) AS raw_value
-        FROM {dataset} AS fp
-        WHERE fp.device_id = '{dev_id}'
-        AND fp.payload_metric_id = '{sens_id}'
-        AND fp.payload_timestamp BETWEEN '{start}' AND '{end}'
-        ORDER BY fp.payload_timestamp;"""
-        return self.client.query(q)
-
+        
     def get_site_pairs(self, site_id):
         dataset = 'datamart_sous_comptage.device_properties'
         query = f"""SELECT DISTINCT customer_account_name, site_name, site_id, device_id, device_name, sensor_id, sensor_name
@@ -72,7 +59,7 @@ class Collector:
         AND lower(sensor_name) LIKE '%index%'
         AND lower(sensor_name) NOT LIKE '%(cons)%'"""
         return query
-
+    
     def query_by_site(self, pairs_df, start, end):
         dataset = 'datawarehouse_stage.fact_payload'
         # dataset = 'datawarehouse_prod.fact_payload'
@@ -87,13 +74,15 @@ class Collector:
         ORDER BY payload_timestamp;"""
         return query
 
-    def get_first_payload(self, dev_id, sens_id):
-        dataset = 'datawarehouse_stage.fact_payload'
+    def get_first_payload(self, dev, sens):
+        table = 'datawarehouse_stage.fact_payload'
         # dataset = 'datawarehouse_prod.fact_payload'
-        q = f"""SELECT min(payload_timestamp)            
-                FROM {dataset} AS fp
-                WHERE fp.device_id = '{dev_id}'
-                AND fp.payload_metric_id = '{sens_id}'"""
+        q = f"""SELECT minOrNull(payload_timestamp)
+                FROM {table} AS fp
+                WHERE fp.device_id = '{dev}'
+                AND fp.payload_metric_id = '{sens}'
+                AND toFloat32OrNull(payload_value) != 0;
+                """
         return self.client.query(q)
 
 class Writer:
@@ -107,4 +96,3 @@ class Writer:
         except Exception as e:
             print(f"""An error occurred during data upload to table {out_table}""", e)
             return 0
-

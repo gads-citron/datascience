@@ -17,7 +17,7 @@ import pandas as pd
 from training import SupervisedModel, W, T, M, NORM_MAX
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
-from db_connector import ClickHouseClient  # noqa: E402
+from db_connector import ClickHouseClient
 
 OUTPUT_PATH = os.path.join(os.path.dirname(__file__), 'predictions.csv')
 
@@ -32,24 +32,11 @@ def query_serie(dev, sens, start, end):
                 ORDER BY payload_timestamp;"""
 
 def build_features_vectorized(series, w=W, t=T, m=M):
-    """Version vectorisée de FeatureBuilder.build_features (training.py), appliquée à toute la
-    série en une fois plutôt que ligne par ligne. Toutes les features sont invariantes à l'échelle
-    du compteur (aucune valeur absolue de payload_value) : les features de lag ne sont que des
-    shift() sur les colonnes déjà calculées (time_delta_seconds, value_diff), et le saut de valeur
-    est exprimé en variation relative (jump_ratio) plutôt qu'en moyenne quadratique brute.
-
-    Les delta_v et jump_ratio sont calculés sur la fenêtre des t points précédents ramenée sur
-    l'échelle 0-NORM_MAX, comme le fait normalize_window côté training. La transformation étant
-    affine, on n'a besoin ici que de ses deux paramètres — le minimum et l'amplitude de la fenêtre —
-    plutôt que de normaliser la fenêtre point par point. Toute évolution doit rester alignée sur
-    training.build_features, sinon le modèle ne voit pas les mêmes features qu'à l'entraînement."""
     features = pd.DataFrame(index=series.index)
     raw = series['raw_value']
     value_window = raw.rolling(window=t + 1, min_periods=1)
     vmin = value_window.min()
     span = value_window.max() - vmin
-    # Une fenêtre plate n'a pas d'échelle : on neutralise la division ici et on retombe sur 0 plus
-    # bas, comme le fait normalize_window en renvoyant des zéros.
     flat = span <= 0
     scale = NORM_MAX / span.where(~flat)
 
@@ -62,11 +49,6 @@ def build_features_vectorized(series, w=W, t=T, m=M):
     # fenêtre des T points avant pos (donc décalée d'1, pos lui-même exclu)
     features['delta_t_median'] = series['time_delta_seconds'].rolling(window=t, min_periods=1).median().shift(1)
 
-    # Moyennes quadratiques sur la fenêtre normalisée. On reconstruit explicitement les M+1 points
-    # de la fenêtre pour retrancher vmin AVANT d'élever au carré. Développer la moyenne de (x-vmin)²
-    # en E[x²] - 2·vmin·E[x] + vmin² tiendrait en trois rolling means, mais serait inutilisable sur
-    # un compteur cumulatif : avec x ≈ 1e6, x² ≈ 1e12 pour une variance locale de quelques unités,
-    # la soustraction perd toute précision et le ratio part à plusieurs milliers.
     padded = np.concatenate([np.full(m, np.nan), raw.to_numpy(dtype=float)])
     windows = np.lib.stride_tricks.sliding_window_view(padded, m + 1)
     normalized = (windows - vmin.to_numpy()[:, None]) * scale.to_numpy()[:, None]
@@ -75,8 +57,7 @@ def build_features_vectorized(series, w=W, t=T, m=M):
         rms_curr = np.sqrt(np.nanmean(normalized ** 2, axis=1))          # [t-M, t], pos inclus
         rms_prev = np.sqrt(np.nanmean(normalized[:, :-1] ** 2, axis=1))  # [t-M, t-1], pos exclu
     jump_ratio = pd.Series((rms_curr - rms_prev) / (np.abs(rms_prev) + 1e-6), index=series.index)
-    # fenêtre plate : pas d'échelle, donc 0. Premier point de la série : la fenêtre [t-M, t-1] est
-    # entièrement hors série, il n'y a rien à comparer, donc NaN (et non 0).
+
     empty_prev = np.isnan(windows[:, :-1]).all(axis=1)
     features['jump_ratio'] = jump_ratio.where(~flat, 0.0).mask(empty_prev)
 
@@ -115,7 +96,6 @@ def predict_period(device_id, sensor_id, start, end, client=None, model=None):
         'payload_timestamp': series['payload_timestamp'],
         'prediction': predictions,
     })
-
 
 def main():
     parser = argparse.ArgumentParser(
