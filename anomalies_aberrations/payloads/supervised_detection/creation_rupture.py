@@ -221,6 +221,50 @@ def device_sensor_treat(device_id, sensor_id, start, end):
     plot_result(df, device_id, sensor_id)
     return len(indices), len(negative_timestamps)
 
+def existing_parquet_pairs(output_dir=OUTPUT_DIR):
+    """Couples (device_id, sensor_id) qui ont déjà au moins un parquet {device_id}_{sensor_id}_*.parquet
+    dans output_dir (suppose qu'aucun des deux ids ne contient de '_')."""
+    pairs = set()
+    for path in glob.glob(os.path.join(output_dir, '*.parquet')):
+        parts = os.path.basename(path).split('_', 2)
+        if len(parts) == 3:
+            pairs.add((parts[0], parts[1]))
+    return pairs
+
+def collect_negative_only_site(site_id, start, end, pairs_path=PAIRS_SOURCE_PATH):
+    """Collecte, pour la période start/end, les séries des couples device_id/sensor_id du site
+    site_id (listés dans device_sensor_index_pairs.csv) qui n'ont pas encore de parquet dans
+    OUTPUT_DIR, et les sauvegarde sans injecter de rupture (exemples négatifs purs). Les fichiers ont
+    le même format et le même nom que ceux de device_sensor_treat, avec is_injected_rupture=False et
+    injected_jump=0. Rien n'est écrit dans la vérité terrain : training.py retrouve ces couples via
+    les parquet. Retourne la liste des chemins écrits."""
+    pairs_df = pd.read_csv(pairs_path, dtype=str)
+    site_pairs = pairs_df.loc[pairs_df['site_id'] == site_id, ['device_id', 'sensor_id']].drop_duplicates()
+    if site_pairs.empty:
+        print(f"Site {site_id} introuvable dans {os.path.basename(pairs_path)}")
+        return []
+    existing = existing_parquet_pairs()
+    todo = [(d, s) for d, s in site_pairs.itertuples(index=False, name=None) if (d, s) not in existing]
+    print(f"Site {site_id} : {len(site_pairs)} couple(s), {len(site_pairs) - len(todo)} déjà présent(s) "
+          f"en parquet, {len(todo)} à collecter")
+
+    client = ClickHouseClient('prod')
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    written = []
+    for device_id, sensor_id in todo:
+        df = client.query(query_serie(device_id, sensor_id, start, end))
+        if df.empty:
+            print(f"Aucune donnée pour {device_id} / {sensor_id} entre {start} et {end}")
+            continue
+        df = df.sort_values('payload_timestamp').reset_index(drop=True)
+        df['is_injected_rupture'] = False
+        df['injected_jump'] = 0.0
+        output_path = os.path.join(OUTPUT_DIR, f"{device_id}_{sensor_id}_{start[:4]}.parquet")
+        df.to_parquet(output_path, index=False)
+        print(f"Sauvegardé : {output_path}")
+        written.append(output_path)
+    return written
+
 def main():
     parser = argparse.ArgumentParser(
         description="Génère des ruptures artificielles sur la série d'un device/sensor "
@@ -229,7 +273,14 @@ def main():
     parser.add_argument('--end', required=True, help="Date de fin, ex: '2026-09-10 23:59:59'")
     parser.add_argument('--n-sites', type=int, default=N_SITES,
                         help=f"Nombre de sites à tirer (défaut: {N_SITES})")
+    parser.add_argument('--negative-site', default=None, metavar='SITE_ID',
+                        help="Collecte sans rupture (exemples négatifs purs) les couples de ce site "
+                             "qui n'ont pas encore de parquet, puis s'arrête (--n-sites est ignoré)")
     args = parser.parse_args()
+    if args.negative_site:
+        written = collect_negative_only_site(args.negative_site, args.start, args.end)
+        print(f"{len(written)} fichier(s) parquet écrit(s) pour le site {args.negative_site}")
+        return
     pairs = select_random_pairs(n_sites=args.n_sites)
     total_positives = 0
     total_negatives = 0

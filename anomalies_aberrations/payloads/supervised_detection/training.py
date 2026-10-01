@@ -11,9 +11,10 @@ from sklearn.metrics import classification_report, confusion_matrix
 
 SYNTHETIC_DATA = os.path.join(os.path.dirname(__file__), 'synthetic_data', 'ruptures')
 SOURCE_VT = os.path.join(SYNTHETIC_DATA, 'verite_terrain.csv')
-MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'rupture_model.joblib')
+MODEL_PATH = os.path.join(os.path.dirname(__file__), 'models', 'rupture_model_30_09_26.joblib')
 NEGATIVE_RATIO = 100  # nombre de négatifs tirés dans la série par rupture injectée
-TRAIN_RATIO = 0.7  # proportion de l'ensemble d'entraînement
+NEGATIVES_WITHOUT_POSITIVE = 500  # nombre fixe de négatifs tirés pour un couple sans aucun positif
+TRAIN_RATIO = 0.7 # proportion de l'ensemble d'entraînement
 W = 7  # nombre de points avant pos utilisés pour les features de lag (valeur, delta_t, delta_v)
 T = 50  # nombre de points avant pos utilisés pour la médiane de delta_t
 M = 5  # taille des fenêtres utilisées pour les moyennes quadratiques de la valeur
@@ -69,7 +70,8 @@ class FeatureBuilder:
     negative_ratio négatifs par positif."""
 
     def __init__(self, sample_idx, w=W, t=T, m=M, negative_ratio=NEGATIVE_RATIO,
-                 random_state=RANDOM_STATE, series_store=None, inpath=SYNTHETIC_DATA):
+                 random_state=RANDOM_STATE, series_store=None, inpath=SYNTHETIC_DATA,
+                 negatives_without_positive=NEGATIVES_WITHOUT_POSITIVE):
         self.idx = sample_idx
         self.w = w
         self.t = t
@@ -77,6 +79,7 @@ class FeatureBuilder:
         self.negative_ratio = negative_ratio
         self.random_state = random_state
         self.series_store = series_store or SeriesStore(inpath=inpath)
+        self.negatives_without_positive = negatives_without_positive
 
     def generer_sample(self):
         """Construit la matrice de features (une ligne par exemple device/sensor/timestamp) et le
@@ -90,16 +93,19 @@ class FeatureBuilder:
             series = self.series_store.fetch_series(device_id, sensor_id)
             if series.empty:
                 continue
-            is_positive = series['payload_timestamp'].isin(set(group['payload_timestamp'])).to_numpy()
+            positives = group[group['label'] == 1]
+            is_positive = series['payload_timestamp'].isin(set(positives['payload_timestamp'])).to_numpy()
             positive_positions = np.flatnonzero(is_positive)
-            if len(positive_positions) != len(group):
-                print(f"{len(group) - len(positive_positions)} timestamp(s) de vérité terrain "
+            if len(positive_positions) != len(positives):
+                print(f"{len(positives) - len(positive_positions)} timestamp(s) de vérité terrain "
                       f"introuvable(s) dans la série {device_id} / {sensor_id}")
             # Avant la position w, les features de lag n'ont pas assez d'historique et valent NaN :
             # on exclut cette zone de chauffe des candidats négatifs.
             candidates = np.flatnonzero(~is_positive)
             candidates = candidates[candidates >= self.w]
-            negative_positions = self.sample_negative_positions(candidates, len(positive_positions), rng)
+            n_negatives = (round(len(positive_positions) * self.negative_ratio) if len(positives)
+                           else self.negatives_without_positive)
+            negative_positions = self.sample_negative_positions(candidates, n_negatives, rng)
             for pos in positive_positions:
                 feature_rows.append(self.build_features(series, int(pos)))
                 labels.append(1)
@@ -110,10 +116,10 @@ class FeatureBuilder:
         y = pd.Series(labels, name='label').reset_index(drop=True)
         return X, y
 
-    def sample_negative_positions(self, candidates, n_positives, rng):
-        """Tire au hasard negative_ratio négatifs par positif parmi candidates (les positions de la
-        série qui ne portent pas de rupture injectée et qui ont assez d'historique)."""
-        n = min(len(candidates), round(n_positives * self.negative_ratio))
+    def sample_negative_positions(self, candidates, n_negatives, rng):
+        """Tire au hasard n_negatifs positions parmi candidates (les positions de la série qui ne
+        portent pas de rupture injectée et qui ont assez d'historique)."""
+        n = min(len(candidates), n_negatives)
         if n <= 0:
             return np.array([], dtype=int)
         return rng.choice(candidates, size=n, replace=False)
@@ -215,28 +221,86 @@ class SupervisedModel:
         instance.model = joblib.load(path)
         return instance
 
-def split_train_test(vt_df, train_ratio=TRAIN_RATIO, random_state=RANDOM_STATE):
-    """Découpe les seuls positifs de la vérité terrain (label=1, c'est-à-dire les ruptures
-    injectées) en train/test, au niveau des couples device_id/sensor_id : jamais une série à cheval
-    sur les deux splits, pour éviter toute fuite (le modèle ne doit pas être évalué sur des séries
-    qu'il a vues en train). Les négatifs ne sont pas découpés ici — ils sont tirés par FeatureBuilder
-    parmi tous les points non marqués rupture de la série de chaque couple, donc du bon côté du
-    split par construction."""
-    positives = vt_df[vt_df['label'] == 1]
-    pairs = positives[['device_id', 'sensor_id']].drop_duplicates().sample(frac=1, random_state=random_state)
-    n_train_pairs = round(len(pairs) * train_ratio)
-    train_pairs = pairs.iloc[:n_train_pairs]
-    test_pairs = pairs.iloc[n_train_pairs:]
+def select_pairs(pairs, spec, name):
+    """Sélectionne dans pairs (DataFrame device_id/sensor_id) les couples visés par spec : une
+    liste dont chaque élément est soit un device_id (str, tous les capteurs du device), soit un
+    tuple (device_id, sensor_id) pour un couple précis. Prévient si un élément ne correspond à
+    aucun couple."""
+    mask = pd.Series(False, index=pairs.index)
+    for item in spec:
+        if isinstance(item, str):
+            hit = pairs['device_id'] == item
+        else:
+            device_id, sensor_id = item
+            hit = (pairs['device_id'] == device_id) & (pairs['sensor_id'] == sensor_id)
+        if not hit.any():
+            print(f"{name} : {item} ne correspond à aucun couple (vérité terrain ou parquet)")
+        mask |= hit
+    return pairs[mask]
 
-    train_idx = positives.merge(train_pairs, on=['device_id', 'sensor_id'])
-    test_idx = positives.merge(test_pairs, on=['device_id', 'sensor_id'])
+
+def list_series_pairs(inpath=SYNTHETIC_DATA):
+    """Couples device_id/sensor_id pour lesquels il existe au moins un parquet
+    {device_id}_{sensor_id}_*.parquet (suppose qu'aucun des deux ids ne contient de '_')."""
+    rows = []
+    for path in glob.glob(os.path.join(inpath, '*.parquet')):
+        parts = os.path.basename(path).split('_', 2)
+        if len(parts) == 3:
+            rows.append(parts[:2])
+    return pd.DataFrame(rows, columns=['device_id', 'sensor_id']).drop_duplicates()
+
+
+def split_train_test(vt_df, train_ratio=TRAIN_RATIO, random_state=RANDOM_STATE,
+                     force_train=(), force_test=(), inpath=SYNTHETIC_DATA):
+    """Découpe en train/test, au niveau des couples device_id/sensor_id : jamais une série à cheval
+    sur les deux splits, pour éviter toute fuite (le modèle ne doit pas être évalué sur des séries
+    qu'il a vues en train). Les couples découpés sont ceux qui ont des positifs dans la vérité
+    terrain (label=1, les ruptures injectées) ainsi que ceux qui ont une série parquet mais aucun
+    positif : pour ces derniers, on ajoute une ligne factice (label=0, payload_timestamp=NaT) afin
+    que FeatureBuilder les parcoure et en tire des négatifs. Les négatifs ne sont pas découpés ici —
+    ils sont tirés par FeatureBuilder parmi tous les points non marqués rupture de la série de
+    chaque couple, donc du bon côté du split par construction.
+
+    force_train / force_test imposent des couples dans un split (device_id, ou tuple
+    (device_id, sensor_id)). Ils sont retirés du tirage aléatoire, qui répartit les couples restants
+    de façon à tenir train_ratio sur l'ensemble des couples (dans la limite de ce que permettent les
+    couples imposés)."""
+    positives = vt_df[vt_df['label'] == 1]
+    positive_pairs = positives[['device_id', 'sensor_id']].drop_duplicates()
+    pairs = (pd.concat([positive_pairs, list_series_pairs(inpath)]).drop_duplicates()
+             .sample(frac=1, random_state=random_state).reset_index(drop=True))
+    forced_train = select_pairs(pairs, force_train, 'force_train')
+    forced_test = select_pairs(pairs, force_test, 'force_test')
+    overlap = forced_train.merge(forced_test, on=['device_id', 'sensor_id'])
+    if not overlap.empty:
+        raise ValueError(f"Couples présents à la fois dans force_train et force_test :\n{overlap}")
+    remaining = pairs.drop(forced_train.index.union(forced_test.index))
+    n_train_free = min(len(remaining), max(0, round(len(pairs) * train_ratio) - len(forced_train)))
+    train_pairs = pd.concat([forced_train, remaining.iloc[:n_train_free]])
+    test_pairs = pd.concat([forced_test, remaining.iloc[n_train_free:]])
+
+    def split_rows(split_pairs):
+        pos = positives.merge(split_pairs, on=['device_id', 'sensor_id'])
+        empty = split_pairs.merge(positive_pairs, on=['device_id', 'sensor_id'], how='left', indicator=True)
+        empty = empty[empty['_merge'] == 'left_only'].drop(columns='_merge')
+        empty = empty.assign(label=0, payload_timestamp=pd.NaT)
+        return pd.concat([pos, empty], ignore_index=True)
+
+    train_idx = split_rows(train_pairs)
+    test_idx = split_rows(test_pairs)
+    n_train_pos = int((train_idx['label'] == 1).sum())
+    n_test_pos = int((test_idx['label'] == 1).sum())
     print(f"{len(train_pairs)} couple(s) en train / {len(test_pairs)} en test "
-          f"({len(train_idx)} positif(s) / {len(test_idx)})")
+          f"({n_train_pos} positif(s) / {n_test_pos}), dont "
+          f"{len(train_idx) - n_train_pos} / {len(test_idx) - n_test_pos} sans positif")
     return train_idx, test_idx
 
 if __name__ == "__main__":
     vt_df = pd.read_csv(SOURCE_VT, dtype={'device_id': str, 'sensor_id': str}, parse_dates=['payload_timestamp'])
-    train_idx, test_idx = split_train_test(vt_df)
+    # Couples imposés : device_id (str) ou tuple (device_id, sensor_id)
+    FORCE_TRAIN = []
+    FORCE_TEST = []
+    train_idx, test_idx = split_train_test(vt_df, force_train=FORCE_TRAIN, force_test=FORCE_TEST)
 
     tr_builder = FeatureBuilder(train_idx)
     X_train, y_train = tr_builder.generer_sample()
