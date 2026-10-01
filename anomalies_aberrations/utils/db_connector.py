@@ -13,14 +13,14 @@ class ClickHouseClient:
     def get_prod(self):
         load_dotenv()
         host = urllib.parse.quote_plus(os.environ.get("clk_prod"))
-        username = urllib.parse.quote_plus(os.environ.get("USER_NAME"))
+        username = urllib.parse.quote_plus(os.environ.get("usr_name"))
         password = urllib.parse.quote_plus(os.environ.get("clk_prod_pass"))
         self.connect(host, username, password)
 
     def get_stage(self):
         load_dotenv()
         host = urllib.parse.quote_plus(os.environ.get("clk_stg"))
-        username = urllib.parse.quote_plus(os.environ.get("USER_NAME"))
+        username = urllib.parse.quote_plus(os.environ.get("usr_name"))
         password = urllib.parse.quote_plus(os.environ.get("clk_stg_pass"))
         self.connect(host, username, password)
 
