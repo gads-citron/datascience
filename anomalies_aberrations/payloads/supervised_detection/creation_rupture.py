@@ -8,13 +8,14 @@ et on stocke la donné modifiée dans des fichiers parquet.
 Usage: python creation_rupture.py <device_id> <sensor_id> <start> <end>
 """
 import argparse
-import glob
 import os
 import random
 import sys
 
 import pandas as pd
-import plotly.express as px
+
+import paths
+from plotting import plot_ruptures
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'utils'))
 from db_connector import ClickHouseClient
@@ -25,18 +26,20 @@ MIN_JUMP = 1000  # saut minimum appliqué à une rupture
 MAX_JUMP = 1e4  # saut maximum appliqué à une rupture
 MIN_NEG = 5  # nombre minimum de négatifs (simple sampling, label=0) tirés par couple device/sensor
 MAX_NEG = 10  # nombre maximum de négatifs (simple sampling, label=0) tirés par couple device/sensor
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'synthetic_data', 'ruptures')
-VT_OUTPUT_PATH = os.path.join(OUTPUT_DIR, 'verite_terrain.csv')  # vérité terrain cumulée sur tous les runs
+OUTPUT_DIR = paths.data_path('training_data', 'ruptures')
+VT_OUTPUT_PATH = paths.data_path('training_data', 'positive_cases.csv')  # vérité terrain cumulée sur tous les runs
 N_SITES = 20
 MIN_SITE_GAP = 2  # écart minimum (en position dans le fichier) entre deux sites choisis, pour ne jamais en prendre deux qui se suivent
 
-PAIRS_SOURCE_PATH = os.path.join(os.path.dirname(__file__), '..', '..', 'utils', 'data', 'device_sensor_index_pairs.csv')
+PAIRS_SOURCE_PATH = paths.data_path('device_sensor_index_pairs.csv') if os.environ.get('DATA_ROOT') else os.path.join(
+    os.path.dirname(__file__), '..', '..', 'utils', 'data', 'device_sensor_index_pairs.csv')
 INDEX_SENSOR_IDS = ['59c3be73bee9f849f51461d3', '61669dcf81278b679e1bc513',
                     '61669de581278b679e1bc514', '61669df381278b679e1bc515',
                     '61669e0081278b679e1bc516', '662bc1c93f0afb78ad05983d',
                     '662bc1c9db23311c9b7fea25']
 TARGET_CUSTOMER_ACCOUNTS = ['ENAC', 'Looping Experiences', 'ISAE - SUPAERO',
-                             "Mairie d'Argenteuil", 'ESSET', 'Réseau ETE - Nouvelle Aquitaine']
+                             "Mairie d'Argenteuil", 'ESSET', 'Réseau ETE - Nouvelle Aquitaine', 
+                             'Université de Toulouse', 'Sodexo (SFRS)']
 
 def query_serie(device_id, sensor_id, start, end):
     dataset = 'datawarehouse_prod.fact_payload'
@@ -90,19 +93,24 @@ def save_ground_truth(df, indices, device_id, sensor_id, negative_timestamps=(),
         'payload_timestamp': list(positive_timestamps) + list(negative_timestamps),
         'label': [1] * len(positive_timestamps) + [0] * len(negative_timestamps),
     })
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    vt_df.to_csv(path, mode='a', header=not os.path.exists(path), index=False)
+    paths.makedirs(paths.dirname(path))
+    # S3 ne sait pas ajouter à un objet existant : on relit le fichier, on concatène et on réécrit.
+    if paths.exists(path):
+        vt_df_full = pd.concat([paths.read_csv(path, dtype=str), vt_df.astype(str)], ignore_index=True)
+    else:
+        vt_df_full = vt_df
+    paths.to_csv(vt_df_full, path, index=False)
     return vt_df
 
 def load_serie(device_id, sensor_id, output_dir=OUTPUT_DIR):
     """Charge la colonne payload_timestamp de tous les fichiers parquet correspondant
     au couple device_id/sensor_id (il peut y en avoir plusieurs, un par run/période)."""
-    pattern = os.path.join(output_dir, f"{device_id}_{sensor_id}_*.parquet")
-    paths = sorted(glob.glob(pattern))
-    if not paths:
+    pattern = paths.join(output_dir, f"{device_id}_{sensor_id}_*.parquet")
+    files = paths.glob(pattern)
+    if not files:
         return pd.Series(dtype='datetime64[ns]')
     return pd.concat(
-        [pd.read_parquet(path, columns=['payload_timestamp']) for path in paths],
+        [paths.read_parquet(path, columns=['payload_timestamp']) for path in files],
         ignore_index=True,
     )['payload_timestamp']
 
@@ -151,17 +159,17 @@ def select_random_pairs(pairs_path=PAIRS_SOURCE_PATH, sensor_ids=INDEX_SENSOR_ID
     déjà présents dans Myriam_test.sous_comptage_anomalies et ceux déjà traités lors d'un run
     précédent (retrouvés via vt_path) sont écartés AVANT le tirage, pour que le tirage porte bien sur
     n_sites sites utilisables. Puis tire un couple device_id/sensor_id au hasard par site retenu."""
-    pairs_df = pd.read_csv(pairs_path, dtype=str)
+    pairs_df = paths.read_csv(pairs_path, dtype=str)
     pairs_df = pairs_df[pairs_df['site_id'].notna() & (pairs_df['site_id'] != '')]
-    print(f"Vivier : {pairs_df['site_id'].nunique()} site(s) dans {os.path.basename(pairs_path)}")
+    print(f"Vivier : {pairs_df['site_id'].nunique()} site(s) dans {paths.basename(pairs_path)}")
     pairs_df = pairs_df[pairs_df['sensor_id'].isin(sensor_ids)]
     print(f"  après filtre sensor_id (capteurs index) : {pairs_df['site_id'].nunique()} site(s)")
     pairs_df = pairs_df[pairs_df['customer_account_name'].isin(customer_account_names)]
     print(f"  après filtre customer_account_name : {pairs_df['site_id'].nunique()} site(s)")
 
     already_treated_sites = set()
-    if os.path.exists(vt_path):
-        treated_devices = pd.read_csv(vt_path, dtype=str)['device_id'].unique()
+    if paths.exists(vt_path):
+        treated_devices = paths.read_csv(vt_path, dtype=str)['device_id'].unique()
         already_treated_sites = set(pairs_df.loc[pairs_df['device_id'].isin(treated_devices), 'site_id'])
 
     client = ClickHouseClient('stage')
@@ -171,7 +179,7 @@ def select_random_pairs(pairs_path=PAIRS_SOURCE_PATH, sensor_ids=INDEX_SENSOR_ID
     excluded_sites = already_treated_sites | existing_sites
     ordered_sites = [site_id for site_id in pairs_df['site_id'].drop_duplicates().tolist()
                       if site_id not in excluded_sites]
-    print(f"  après exclusion des runs précédents ({len(already_treated_sites)} via {os.path.basename(vt_path)}) "
+    print(f"  après exclusion des runs précédents ({len(already_treated_sites)} via {paths.basename(vt_path)}) "
           f"et de sous_comptage_anomalies ({len(existing_sites)} site(s) en base) : "
           f"{len(ordered_sites)} site(s) disponible(s)")
 
@@ -189,18 +197,6 @@ def select_random_pairs(pairs_path=PAIRS_SOURCE_PATH, sensor_ids=INDEX_SENSOR_ID
     print(f"{len(result_pairs)} couple(s) device/sensor sélectionné(s)")
     return result_pairs
 
-def plot_result(df, device_id, sensor_id):
-    """Scatter plot de raw_value au cours du temps, avec les ruptures injectées en évidence."""
-    fig = px.scatter(
-        df, x='payload_timestamp', y='raw_value', template='plotly_white',
-        title=f"{device_id} / {sensor_id} — ruptures injectées",
-        labels={'payload_timestamp': 'Date', 'raw_value': 'payload_value'},
-    )
-    fig.update_traces(marker=dict(size=4))
-    for ts in df.loc[df['is_injected_rupture'], 'payload_timestamp']:
-        fig.add_vline(x=ts, line_dash='dash', line_color='red')
-    fig.show()
-
 def device_sensor_treat(device_id, sensor_id, start, end):
     client = ClickHouseClient('prod')
     df = client.query(query_serie(device_id, sensor_id, start, end))
@@ -210,23 +206,23 @@ def device_sensor_treat(device_id, sensor_id, start, end):
     df = df.sort_values('payload_timestamp').reset_index(drop=True)
     indices = generate_rupture_indices(len(df))
     df = apply_ruptures(df, indices)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    paths.makedirs(OUTPUT_DIR)
     date_tag = start[:4]
-    output_path = os.path.join(OUTPUT_DIR, f"{device_id}_{sensor_id}_{date_tag}.parquet")
-    df.to_parquet(output_path, index=False)
+    output_path = paths.join(OUTPUT_DIR,f"{device_id}_{sensor_id}_{date_tag}.parquet")
+    paths.to_parquet(df, output_path, index=False)
     print(f"Sauvegardé : {output_path}")
     negative_timestamps = sample_negative_timestamps(device_id, sensor_id, df.loc[indices, 'payload_timestamp'])
     save_ground_truth(df, indices, device_id, sensor_id, negative_timestamps)
     print(f"Vérité terrain mise à jour : {VT_OUTPUT_PATH}")
-    plot_result(df, device_id, sensor_id)
+    plot_ruptures(df, device_id, sensor_id)
     return len(indices), len(negative_timestamps)
 
 def existing_parquet_pairs(output_dir=OUTPUT_DIR):
     """Couples (device_id, sensor_id) qui ont déjà au moins un parquet {device_id}_{sensor_id}_*.parquet
     dans output_dir (suppose qu'aucun des deux ids ne contient de '_')."""
     pairs = set()
-    for path in glob.glob(os.path.join(output_dir, '*.parquet')):
-        parts = os.path.basename(path).split('_', 2)
+    for path in paths.glob(paths.join(output_dir, '*.parquet')):
+        parts = paths.basename(path).split('_', 2)
         if len(parts) == 3:
             pairs.add((parts[0], parts[1]))
     return pairs
@@ -238,10 +234,10 @@ def collect_negative_only_site(site_id, start, end, pairs_path=PAIRS_SOURCE_PATH
     le même format et le même nom que ceux de device_sensor_treat, avec is_injected_rupture=False et
     injected_jump=0. Rien n'est écrit dans la vérité terrain : training.py retrouve ces couples via
     les parquet. Retourne la liste des chemins écrits."""
-    pairs_df = pd.read_csv(pairs_path, dtype=str)
+    pairs_df = paths.read_csv(pairs_path, dtype=str)
     site_pairs = pairs_df.loc[pairs_df['site_id'] == site_id, ['device_id', 'sensor_id']].drop_duplicates()
     if site_pairs.empty:
-        print(f"Site {site_id} introuvable dans {os.path.basename(pairs_path)}")
+        print(f"Site {site_id} introuvable dans {paths.basename(pairs_path)}")
         return []
     existing = existing_parquet_pairs()
     todo = [(d, s) for d, s in site_pairs.itertuples(index=False, name=None) if (d, s) not in existing]
@@ -249,7 +245,7 @@ def collect_negative_only_site(site_id, start, end, pairs_path=PAIRS_SOURCE_PATH
           f"en parquet, {len(todo)} à collecter")
 
     client = ClickHouseClient('prod')
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    paths.makedirs(OUTPUT_DIR)
     written = []
     for device_id, sensor_id in todo:
         df = client.query(query_serie(device_id, sensor_id, start, end))
@@ -259,8 +255,8 @@ def collect_negative_only_site(site_id, start, end, pairs_path=PAIRS_SOURCE_PATH
         df = df.sort_values('payload_timestamp').reset_index(drop=True)
         df['is_injected_rupture'] = False
         df['injected_jump'] = 0.0
-        output_path = os.path.join(OUTPUT_DIR, f"{device_id}_{sensor_id}_{start[:4]}.parquet")
-        df.to_parquet(output_path, index=False)
+        output_path = paths.join(OUTPUT_DIR, f"{device_id}_{sensor_id}_{start[:4]}.parquet")
+        paths.to_parquet(df, output_path, index=False)
         print(f"Sauvegardé : {output_path}")
         written.append(output_path)
     return written

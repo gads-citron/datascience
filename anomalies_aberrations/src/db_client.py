@@ -69,7 +69,13 @@ class Collector:
         AND lower(sensor_name) NOT LIKE '%(cons)%'"""
         return query, {"site_id": str(site_id)}
 
-    def query_by_site(self, pairs_df, start, end):
+    def query_by_site(self, pairs_df, start, end, mode):
+        if mode == "incremental":
+            col_date = "updated_at"
+        elif mode == "full_refresh":
+            col_date = "payload_timestamp"
+        else:
+            raise ValueError(f"Mode inconnu : {mode}")
         device_ids = [str(d) for d in pairs_df["device_id"].dropna().unique()]
         sensor_ids = [str(s) for s in pairs_df["sensor_id"].dropna().unique()]
         query = f"""SELECT device_id, payload_metric_id AS sensor_id, payload_timestamp,
@@ -77,7 +83,7 @@ class Collector:
         FROM {p.FACT_TABLE}
         WHERE payload_metric_id IN {{sensor_ids:Array(String)}}
         AND device_id IN {{device_ids:Array(String)}}
-        AND payload_timestamp BETWEEN {{start:String}} AND {{end:String}}
+        AND {col_date} BETWEEN {{start:String}} AND {{end:String}}
         ORDER BY payload_timestamp"""
         return query, {
             "sensor_ids": sensor_ids,
