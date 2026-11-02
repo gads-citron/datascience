@@ -25,7 +25,7 @@ MIN_CHILD_SAMPLES = 20  # nombre minimal d'exemples par feuille LightGBM (défau
 MODEL_TYPE = 'lightgbm'  # 'lightgbm' ou 'mlp' (réseau de neurones, neural_network.py)
 # Chaque entraînement crée une nouvelle version de ce modèle dans le registre MLflow ; MODEL_URI est
 # le modèle chargé par défaut par SupervisedModel.load (evaluation.py, predict.py).
-REGISTERED_MODEL_NAME = 'rupture_detection_model'
+REGISTERED_MODEL_NAME = 'rupture-detection-model'  # SageMaker : lettres, chiffres et tirets uniquement (pas d'underscore)
 MODEL_URI = f'models:/{REGISTERED_MODEL_NAME}/latest'
 
 class SupervisedModel:
