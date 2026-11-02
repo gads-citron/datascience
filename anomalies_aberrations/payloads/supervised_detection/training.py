@@ -18,7 +18,7 @@ from model_params import MODEL_PARAMS
 from neural_network import build_neural_network
 
 # W, T, M et NORM_MAX ne servent pas ici : evaluation.py et predict.py les importent depuis training.
-from data_preparation import FeatureBuilder, split_train_test, SOURCE_VT, RANDOM_STATE, TRAIN_RATIO, W, T, M, NORM_MAX  # noqa: F401
+from data_preparation import load_train_test, dataset_hash, RANDOM_STATE, TRAIN_RATIO, W, T, M, NORM_MAX  # noqa: F401
 
 MLFLOW_TRACKING_URI = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-CZPP4GNRF7VT'
 MLFLOW_EXPERIMENT = 'rupture_detection'  # surchargeable par la variable d'env MLFLOW_EXPERIMENT_NAME
@@ -147,13 +147,7 @@ def log_loss_curves(network):
 
 
 if __name__ == "__main__":
-    vt_df = paths.read_csv(SOURCE_VT, dtype={'device_id': str, 'sensor_id': str}, parse_dates=['payload_timestamp'])
-    train_idx, test_idx = split_train_test(vt_df)
-
-    tr_builder = FeatureBuilder(train_idx)
-    X_train, y_train = tr_builder.generer_sample()
-    ts_builder = FeatureBuilder(test_idx)
-    X_test, y_test = ts_builder.generer_sample()
+    X_train, y_train, X_test, y_test = load_train_test()
     print(f"Train : {int(y_train.sum())} positif(s) / {int((y_train == 0).sum())} négatif(s)")
     print(f"Test  : {int(y_test.sum())} positif(s) / {int((y_test == 0).sum())} négatif(s)")
 
@@ -168,6 +162,7 @@ if __name__ == "__main__":
             'n_train_pos': int(y_train.sum()), 'n_train_neg': int((y_train == 0).sum()),
             'n_test_pos': int(y_test.sum()), 'n_test_neg': int((y_test == 0).sum()),
             'data_root': paths.DATA_ROOT,
+            'test_set_hash': dataset_hash(X_test, y_test),  # evaluation.py vérifie que son test set est identique
         })
         model.fit(X_train, y_train)
         report = model.evaluate(X_test, y_test)

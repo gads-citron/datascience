@@ -3,6 +3,8 @@ Préparation des données d'entraînement du modèle de détection de rupture : 
 parquet (SeriesStore), construction des features et des labels (FeatureBuilder, normalize_window)
 et découpage train/test par couple device_id/sensor_id (list_series_pairs, split_train_test).
 """
+import hashlib
+
 import numpy as np
 import pandas as pd
 
@@ -238,3 +240,23 @@ def split_train_test(vt_df, train_ratio=TRAIN_RATIO, random_state=RANDOM_STATE, 
           f"({n_train_pos} positif(s) / {n_test_pos}), dont "
           f"{len(train_idx) - n_train_pos} / {len(test_idx) - n_test_pos} sans positif")
     return train_idx, test_idx
+
+
+def load_train_test():
+    """Construit (X_train, y_train, X_test, y_test) à partir de la vérité terrain SOURCE_VT. C'est
+    l'unique point d'entrée utilisé par training.py ET evaluation.py : les deux obtiennent ainsi
+    le même split et les mêmes négatifs tirés (tout est seedé par RANDOM_STATE)."""
+    vt_df = paths.read_csv(SOURCE_VT, dtype={'device_id': str, 'sensor_id': str}, parse_dates=['payload_timestamp'])
+    train_idx, test_idx = split_train_test(vt_df)
+    X_train, y_train = FeatureBuilder(train_idx).generer_sample()
+    X_test, y_test = FeatureBuilder(test_idx).generer_sample()
+    return X_train, y_train, X_test, y_test
+
+
+def dataset_hash(X, y):
+    """Empreinte (16 caractères) de la matrice de features et des labels : permet de vérifier que
+    deux jeux de test sont identiques (training.py la logge, evaluation.py la compare)."""
+    digest = hashlib.sha256()
+    digest.update(np.ascontiguousarray(X.to_numpy(dtype=float)).tobytes())
+    digest.update(np.ascontiguousarray(y.to_numpy(dtype=float)).tobytes())
+    return digest.hexdigest()[:16]
