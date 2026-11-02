@@ -23,7 +23,7 @@ from data_preparation import FeatureBuilder, split_train_test, SOURCE_VT, RANDOM
 MLFLOW_TRACKING_URI = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-CZPP4GNRF7VT'
 MLFLOW_EXPERIMENT = 'rupture_detection'  # surchargeable par la variable d'env MLFLOW_EXPERIMENT_NAME
 MODEL_TYPE = 'lightgbm'  # 'lightgbm' ou 'mlp' 
-REGISTERED_MODEL_NAME = 'rupture-detection-model'  # SageMaker : lettres, chiffres et tirets uniquement (pas d'underscore)
+REGISTERED_MODEL_NAME = 'rupture-detection-model'
 MODEL_URI = f'models:/{REGISTERED_MODEL_NAME}/latest'
 
 class SupervisedModel:
@@ -55,6 +55,8 @@ class SupervisedModel:
             here = os.path.dirname(__file__)
             mlflow.sklearn.log_model(self.model, artifact_path=artifact_path, signature=signature,
                                      registered_model_name=registered,
+                                     # skops (format par défaut) ne sait pas sérialiser les tenseurs PyTorch.
+                                     serialization_format='cloudpickle',
                                      code_paths=[os.path.join(here, 'neural_network.py'),
                                                  os.path.join(here, 'model_params.py')])
 
