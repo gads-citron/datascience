@@ -9,6 +9,7 @@ manquante en colonnes supplémentaires, pour que le réseau voie qu'une valeur m
 la confondre avec une vraie valeur) puis une standardisation, ajustées sur le train uniquement.
 """
 import copy
+import os
 
 import numpy as np
 import torch
@@ -19,17 +20,21 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from torch import nn
 
-N_HIDDEN_LAYERS = 4  # nombre de couches cachées
-HIDDEN_UNITS = 200  # nombre de neurones par couche cachée
-LEARNING_RATE = 1.0  # valeur par défaut d'Adadelta dans PyTorch (il adapte lui-même le pas)
-BATCH_SIZE = 256
-MAX_EPOCHS = 500  # nombre maximal d'époques
-PATIENCE = 10  # arrêt si la loss de validation ne progresse pas pendant ce nombre d'époques
-VAL_FRACTION = 0.1  # part du train réservée à la validation (early stopping)
-THRESHOLD = 0.5  # seuil de probabilité au-dessus duquel predict renvoie 1
+from model_params import MLP_PARAMS, MLP_THRESHOLD  # hyperparamètres par défaut : model_params.py
+
+# Requis par torch.use_deterministic_algorithms sur GPU (cuBLAS) ; à fixer avant toute init CUDA.
+os.environ.setdefault('CUBLAS_WORKSPACE_CONFIG', ':4096:8')
+
+OPTIMIZERS = {
+    'adadelta': torch.optim.Adadelta,
+    'adam': torch.optim.Adam,
+    'adamw': torch.optim.AdamW,
+    'sgd': torch.optim.SGD,
+    'rmsprop': torch.optim.RMSprop,
+}
 
 
-def build_mlp(n_inputs, n_hidden_layers=N_HIDDEN_LAYERS, hidden_units=HIDDEN_UNITS):
+def build_mlp(n_inputs, n_hidden_layers=MLP_PARAMS['n_hidden_layers'], hidden_units=MLP_PARAMS['hidden_units']):
     """Perceptron multicouche : n_hidden_layers couches Linear(hidden_units) + ReLU, puis une
     couche de sortie à un logit (la sigmoïde est dans la loss à l'entraînement et dans
     predict_proba)."""
@@ -46,12 +51,15 @@ class TorchMLPClassifier(BaseEstimator, ClassifierMixin):
     scale_pos_weight pour LightGBM) multiplie la loss des positifs pour compenser le déséquilibre
     entre classes."""
 
-    def __init__(self, n_hidden_layers=N_HIDDEN_LAYERS, hidden_units=HIDDEN_UNITS,
-                 learning_rate=LEARNING_RATE, batch_size=BATCH_SIZE, max_epochs=MAX_EPOCHS,
-                 patience=PATIENCE, val_fraction=VAL_FRACTION, weight_decay=0.0,
-                 pos_weight=None, random_state=None):
+    def __init__(self, n_hidden_layers=MLP_PARAMS['n_hidden_layers'], hidden_units=MLP_PARAMS['hidden_units'],
+                 optimizer=MLP_PARAMS['optimizer'], learning_rate=MLP_PARAMS['learning_rate'], batch_size=MLP_PARAMS['batch_size'],
+                 max_epochs=MLP_PARAMS['max_epochs'], patience=MLP_PARAMS['patience'],
+                 val_fraction=MLP_PARAMS['val_fraction'], weight_decay=MLP_PARAMS['weight_decay'],
+                 pos_weight=MLP_PARAMS['pos_weight'], imputer_strategy=MLP_PARAMS['imputer_strategy'],
+                 add_missing_indicator=MLP_PARAMS['add_missing_indicator'], random_state=None):
         self.n_hidden_layers = n_hidden_layers
         self.hidden_units = hidden_units
+        self.optimizer = optimizer
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.max_epochs = max_epochs
@@ -59,6 +67,8 @@ class TorchMLPClassifier(BaseEstimator, ClassifierMixin):
         self.val_fraction = val_fraction
         self.weight_decay = weight_decay
         self.pos_weight = pos_weight
+        self.imputer_strategy = imputer_strategy
+        self.add_missing_indicator = add_missing_indicator
         self.random_state = random_state
 
     @staticmethod
@@ -67,10 +77,13 @@ class TorchMLPClassifier(BaseEstimator, ClassifierMixin):
 
     def fit(self, X, y):
         if self.random_state is not None:
-            torch.manual_seed(self.random_state)
+            torch.manual_seed(self.random_state)  # seed aussi les GPU
+            torch.use_deterministic_algorithms(True)
+            torch.backends.cudnn.benchmark = False
         y = np.asarray(y, dtype=np.float32)
         self.classes_ = np.array([0, 1])
-        self.preprocessor_ = make_pipeline(SimpleImputer(strategy='median', add_indicator=True),
+        self.preprocessor_ = make_pipeline(SimpleImputer(strategy=self.imputer_strategy,
+                                                         add_indicator=self.add_missing_indicator),
                                            StandardScaler())
         X_all = self.preprocessor_.fit_transform(np.asarray(X, dtype=np.float32)).astype(np.float32)
 
@@ -82,8 +95,10 @@ class TorchMLPClassifier(BaseEstimator, ClassifierMixin):
 
         device = self._device()
         self.network_ = build_mlp(X_all.shape[1], self.n_hidden_layers, self.hidden_units).to(device)
-        optimizer = torch.optim.Adadelta(self.network_.parameters(), lr=self.learning_rate,
-                                         weight_decay=self.weight_decay)
+        if self.optimizer not in OPTIMIZERS:
+            raise ValueError(f"optimizer inconnu: {self.optimizer} (choix : {sorted(OPTIMIZERS)})")
+        optimizer = OPTIMIZERS[self.optimizer](self.network_.parameters(), lr=self.learning_rate,
+                                               weight_decay=self.weight_decay)
         pos_weight = None if self.pos_weight is None else torch.tensor([self.pos_weight], device=device)
         loss_fn = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
@@ -126,7 +141,7 @@ class TorchMLPClassifier(BaseEstimator, ClassifierMixin):
         return np.column_stack([1 - p1, p1])
 
     def predict(self, X):
-        return (self.predict_proba(X)[:, 1] >= THRESHOLD).astype(int)
+        return (self.predict_proba(X)[:, 1] >= MLP_THRESHOLD).astype(int)
 
 
 def build_neural_network(**params):

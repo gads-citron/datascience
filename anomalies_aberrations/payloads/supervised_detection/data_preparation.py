@@ -214,7 +214,10 @@ def split_train_test(vt_df, train_ratio=TRAIN_RATIO, random_state=RANDOM_STATE, 
     construction."""
     positives = vt_df.drop(columns='label', errors='ignore')
     positive_pairs = positives[['device_id', 'sensor_id']].drop_duplicates()
+    # Tri avant le mélange : l'ordre des fichiers renvoyé par glob n'est pas garanti stable, et
+    # sample(random_state) dépend de l'ordre d'entrée, donc le split ne serait pas reproductible.
     pairs = (pd.concat([positive_pairs, list_series_pairs(inpaths)]).drop_duplicates()
+             .sort_values(['device_id', 'sensor_id'])
              .sample(frac=1, random_state=random_state).reset_index(drop=True))
     n_train = round(len(pairs) * train_ratio)
     train_pairs = pairs.iloc[:n_train]

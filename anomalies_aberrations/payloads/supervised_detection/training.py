@@ -14,6 +14,7 @@ import mlflow.sklearn
 from sklearn.metrics import classification_report, confusion_matrix
 
 import paths
+from model_params import MODEL_PARAMS
 from neural_network import build_neural_network
 
 # W, T, M et NORM_MAX ne servent pas ici : evaluation.py et predict.py les importent depuis training.
@@ -21,10 +22,7 @@ from data_preparation import FeatureBuilder, split_train_test, SOURCE_VT, RANDOM
 
 MLFLOW_TRACKING_URI = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-CZPP4GNRF7VT'
 MLFLOW_EXPERIMENT = 'rupture_detection'  # surchargeable par la variable d'env MLFLOW_EXPERIMENT_NAME
-MIN_CHILD_SAMPLES = 20  # nombre minimal d'exemples par feuille LightGBM (défaut LightGBM : 20)
-MODEL_TYPE = 'lightgbm'  # 'lightgbm' ou 'mlp' (réseau de neurones, neural_network.py)
-# Chaque entraînement crée une nouvelle version de ce modèle dans le registre MLflow ; MODEL_URI est
-# le modèle chargé par défaut par SupervisedModel.load (evaluation.py, predict.py).
+MODEL_TYPE = 'lightgbm'  # 'lightgbm' ou 'mlp' 
 REGISTERED_MODEL_NAME = 'rupture-detection-model'  # SageMaker : lettres, chiffres et tirets uniquement (pas d'underscore)
 MODEL_URI = f'models:/{REGISTERED_MODEL_NAME}/latest'
 
@@ -52,11 +50,13 @@ class SupervisedModel:
             mlflow.lightgbm.log_model(self.model, artifact_path=artifact_path, signature=signature,
                                       registered_model_name=registered)
         else:
-            # code_paths : le classifieur PyTorch est une classe de neural_network.py, nécessaire
-            # pour recharger le modèle depuis MLflow.
+            # code_paths : le classifieur PyTorch est une classe de neural_network.py (qui importe
+            # model_params.py), nécessaires pour recharger le modèle depuis MLflow.
+            here = os.path.dirname(__file__)
             mlflow.sklearn.log_model(self.model, artifact_path=artifact_path, signature=signature,
                                      registered_model_name=registered,
-                                     code_paths=[os.path.join(os.path.dirname(__file__), 'neural_network.py')])
+                                     code_paths=[os.path.join(here, 'neural_network.py'),
+                                                 os.path.join(here, 'model_params.py')])
 
     def fit(self, X, y):
         self.model = self._build_model()
@@ -155,15 +155,7 @@ if __name__ == "__main__":
     print(f"Train : {int(y_train.sum())} positif(s) / {int((y_train == 0).sum())} négatif(s)")
     print(f"Test  : {int(y_test.sum())} positif(s) / {int((y_test == 0).sum())} négatif(s)")
 
-    # Pas de scale_pos_weight : les positifs ne sont pas repondérés malgré le déséquilibre.
-    # min_child_samples (taille minimale d'une feuille) : le défaut (20) donne 64 faux positifs et
-    # 11 ruptures manquées sur le test. Testé plus bas (5, 15), le FPR explose sans gain de rappel ;
-    # testé plus haut (50), le rappel s'effondre (48 ruptures manquées sur 59) : on reste à 20.
-    if MODEL_TYPE == 'lightgbm':
-        model = SupervisedModel(model_type='lightgbm', random_state=RANDOM_STATE,
-                                min_child_samples=MIN_CHILD_SAMPLES)
-    else:
-        model = SupervisedModel(model_type=MODEL_TYPE, random_state=RANDOM_STATE)
+    model = SupervisedModel(model_type=MODEL_TYPE, random_state=RANDOM_STATE, **MODEL_PARAMS[MODEL_TYPE])
     init_mlflow()
     now = datetime.now()
     run_name = f"{MODEL_TYPE}_{now:%Y%m%d}_{now:%H%M%S}"
