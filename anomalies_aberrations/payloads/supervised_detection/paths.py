@@ -4,7 +4,7 @@ la variable d'environnement DATA_ROOT si elle est définie (URL s3://bucket/pref
 boto3), sinon le dossier de ce module (local). Les mêmes sous-dossiers (training_data/, models/,
 ...) sont utilisés partout, en local comme sur S3.
 Tous les accès fichiers passent par les helpers ci-dessous (join, glob, exists, read_parquet,
-to_parquet, read_csv, to_csv, load_joblib, dump_joblib), qui acceptent indifféremment un chemin
+to_parquet, read_csv, to_csv), qui acceptent indifféremment un chemin
 local ou une URL s3://.
 """
 import fnmatch
@@ -12,12 +12,11 @@ import glob as _glob
 import io
 import os
 
-import joblib
 import pandas as pd
 
 # Interrupteur unique local / SageMaker : True = données dans ce dossier et identifiants ClickHouse
 # du .env ; False = données sur S3 (S3_ROOT) et identifiants du secret AWS (voir db_connector.py).
-LOCAL = True
+LOCAL = False
 S3_ROOT = 's3://gads-citron-sagemaker-custom-stage/data/anomaly'  # racine des données sur S3
 DATA_ROOT = os.path.dirname(os.path.abspath(__file__)) if LOCAL else S3_ROOT
 
@@ -144,18 +143,3 @@ def to_csv(df, path, **kwargs):
         df.to_csv(path, **kwargs)
         return
     write_bytes(path, df.to_csv(**kwargs).encode('utf-8'))
-
-
-def load_joblib(path):
-    if not is_remote(path):
-        return joblib.load(path)
-    return joblib.load(io.BytesIO(read_bytes(path)))
-
-
-def dump_joblib(obj, path):
-    if not is_remote(path):
-        joblib.dump(obj, path)
-        return
-    buffer = io.BytesIO()
-    joblib.dump(obj, buffer)
-    write_bytes(path, buffer.getvalue())

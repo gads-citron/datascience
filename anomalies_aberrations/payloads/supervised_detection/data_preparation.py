@@ -33,6 +33,8 @@ def normalize_window(values, out_max=NORM_MAX):
     values = np.asarray(values, dtype=float)
     if values.size == 0:
         return values
+    if np.isnan(values).all():
+        return values  # fenêtre sans aucune valeur : on garde les NaN (pas de remplissage par 0)
     vmin = np.nanmin(values)
     vmax = np.nanmax(values)
     amplitude = vmax - vmin

@@ -3,24 +3,30 @@ Script pour apprendre à détecter les anomalies en mode supervisé à partir d'
 La préparation des données (séries, features, split train/test) est dans data_preparation.py.
 """
 import os
-from datetime import date
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import lightgbm as lgb
 import mlflow
 import mlflow.lightgbm
+import mlflow.sklearn
 from sklearn.metrics import classification_report, confusion_matrix
 
 import paths
+from neural_network import build_neural_network
 
 # W, T, M et NORM_MAX ne servent pas ici : evaluation.py et predict.py les importent depuis training.
 from data_preparation import FeatureBuilder, split_train_test, SOURCE_VT, RANDOM_STATE, TRAIN_RATIO, W, T, M, NORM_MAX  # noqa: F401
 
 MLFLOW_TRACKING_URI = 'arn:aws:sagemaker:eu-west-3:585762237892:mlflow-app/app-CZPP4GNRF7VT'
 MLFLOW_EXPERIMENT = 'rupture_detection'  # surchargeable par la variable d'env MLFLOW_EXPERIMENT_NAME
-MODEL_DIR = paths.data_path('models')
-# Modèle chargé par défaut par SupervisedModel.load ; save() écrit sous un nom daté (dated_model_path).
-MODEL_PATH = paths.join(MODEL_DIR,'rupture_model_20_10_2026.joblib')
 MIN_CHILD_SAMPLES = 20  # nombre minimal d'exemples par feuille LightGBM (défaut LightGBM : 20)
+MODEL_TYPE = 'lightgbm'  # 'lightgbm' ou 'mlp' (réseau de neurones, neural_network.py)
+# Chaque entraînement crée une nouvelle version de ce modèle dans le registre MLflow ; MODEL_URI est
+# le modèle chargé par défaut par SupervisedModel.load (evaluation.py, predict.py).
+REGISTERED_MODEL_NAME = 'rupture_detection_model'
+MODEL_URI = f'models:/{REGISTERED_MODEL_NAME}/latest'
 
 class SupervisedModel:
     """Enveloppe un modèle supervisé (LightGBM pour commencer) pour l'entraînement/l'évaluation."""
@@ -33,7 +39,24 @@ class SupervisedModel:
     def _build_model(self):
         if self.model_type == 'lightgbm':
             return lgb.LGBMClassifier(**self.model_params)
+        if self.model_type == 'mlp':
+            return build_neural_network(**self.model_params)
         raise ValueError(f"model_type inconnu: {self.model_type}")
+
+    def log_to_mlflow(self, X_example, artifact_path='model'):
+        """Enregistre le modèle entraîné dans le run MLflow courant, avec le flavor adapté au type
+        de modèle (LightGBM ou Pipeline sklearn pour le réseau de neurones)."""
+        signature = mlflow.models.infer_signature(X_example, self.predict(X_example))
+        registered = REGISTERED_MODEL_NAME
+        if self.model_type == 'lightgbm':
+            mlflow.lightgbm.log_model(self.model, artifact_path=artifact_path, signature=signature,
+                                      registered_model_name=registered)
+        else:
+            # code_paths : le classifieur PyTorch est une classe de neural_network.py, nécessaire
+            # pour recharger le modèle depuis MLflow.
+            mlflow.sklearn.log_model(self.model, artifact_path=artifact_path, signature=signature,
+                                     registered_model_name=registered,
+                                     code_paths=[os.path.join(os.path.dirname(__file__), 'neural_network.py')])
 
     def fit(self, X, y):
         self.model = self._build_model()
@@ -44,17 +67,20 @@ class SupervisedModel:
         return self.model.predict(X)
 
     def metrics(self, X, y):
-        """Métriques numériques de evaluate (TN/FP/FN/TP, FPR, précision et rappel sur les
+        """Métriques numériques de evaluate (TN/FP/FN/TP, FPR, précision, rappel et F1 sur les
         positifs), sous forme de dict : c'est ce qui est loggé dans MLflow."""
         y_pred = self.predict(X)
         tn, fp, fn, tp = (int(v) for v in confusion_matrix(y, y_pred, labels=[0, 1]).ravel())
         n_neg = tn + fp
         n_pos = tp + fn
+        precision = tp / (tp + fp) if (tp + fp) else float('nan')
+        recall = tp / n_pos if n_pos else float('nan')
         return {
             'tn': tn, 'fp': fp, 'fn': fn, 'tp': tp,
             'fpr': fp / n_neg if n_neg else float('nan'),
-            'precision': tp / (tp + fp) if (tp + fp) else float('nan'),
-            'recall': tp / n_pos if n_pos else float('nan'),
+            'precision': precision,
+            'recall': recall,
+            'f1': 2 * precision * recall / (precision + recall) if (precision + recall) else float('nan'),
         }
 
     def evaluate(self, X, y):
@@ -80,33 +106,42 @@ class SupervisedModel:
             f"Précision des alertes : {100 * precision:.1f}% ({tp} vraie(s) sur {tp + fp} levée(s))",
         ])
 
-    def save(self, path=None):
-        """Sauvegarde le modèle entraîné (self.model) pour le recharger depuis un autre fichier.
-        Sans path, le nom contient la date du jour (dated_model_path) pour ne pas écraser un modèle
-        précédent."""
-        path = path or dated_model_path()
-        paths.makedirs(paths.dirname(path))
-        paths.dump_joblib(self.model, path)
-        return path
-
     @classmethod
-    def load(cls, path=MODEL_PATH, model_type='lightgbm'):
-        """Recharge un modèle sauvegardé par save() dans une nouvelle instance de SupervisedModel."""
+    def load(cls, model_uri=MODEL_URI, model_type=MODEL_TYPE):
+        """Recharge depuis MLflow un modèle enregistré par log_to_mlflow (model_uri : 'models:/nom/
+        version' ou 'runs:/<run_id>/model') dans une nouvelle instance de SupervisedModel."""
+        init_mlflow()
         instance = cls(model_type=model_type)
-        instance.model = paths.load_joblib(path)
+        loader = mlflow.lightgbm if model_type == 'lightgbm' else mlflow.sklearn
+        instance.model = loader.load_model(model_uri)
         return instance
 
-def dated_model_path(model_dir=MODEL_DIR, today=None):
-    """Chemin models/rupture_model_jj_mm_aaaa.joblib avec la date du jour. Si ce fichier existe
-    déjà (plusieurs entraînements le même jour), ajoute un suffixe _2, _3, etc. plutôt que de
-    l'écraser."""
-    stamp = (today or date.today()).strftime('%d_%m_%Y')
-    path = paths.join(model_dir, f'rupture_model_{stamp}.joblib')
-    n = 2
-    while paths.exists(path):
-        path = paths.join(model_dir,f'rupture_model_{stamp}_{n}.joblib')
-        n += 1
-    return path
+
+def init_mlflow():
+    """Pointe MLflow vers le serveur de tracking SageMaker et l'expérience de la détection."""
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(os.environ.get('MLFLOW_EXPERIMENT_NAME', MLFLOW_EXPERIMENT))
+
+
+def log_loss_curves(network):
+    """Trace les courbes de loss train/validation du réseau de neurones (une valeur par époque) et
+    les enregistre dans le run MLflow, en figure et en métriques par époque."""
+    train_loss, val_loss = network.train_loss_history_, network.val_loss_history_
+    for epoch, (tr, va) in enumerate(zip(train_loss, val_loss), start=1):
+        mlflow.log_metrics({'train_loss': tr, 'val_loss': va}, step=epoch)
+    best_epoch = int(np.argmin(val_loss)) + 1
+    fig, ax = plt.subplots(figsize=(8, 5))
+    epochs = range(1, len(train_loss) + 1)
+    ax.plot(epochs, train_loss, label='train')
+    ax.plot(epochs, val_loss, label='validation')
+    ax.axvline(best_epoch, color='grey', linestyle='--', label=f'meilleure époque ({best_epoch})')
+    ax.set_xlabel('Époque')
+    ax.set_ylabel('Loss (BCE)')
+    ax.set_title('Loss du réseau de neurones')
+    ax.legend()
+    mlflow.log_figure(fig, 'loss_curves.png')
+    plt.show()
+    plt.close(fig)
 
 
 if __name__ == "__main__":
@@ -124,11 +159,15 @@ if __name__ == "__main__":
     # min_child_samples (taille minimale d'une feuille) : le défaut (20) donne 64 faux positifs et
     # 11 ruptures manquées sur le test. Testé plus bas (5, 15), le FPR explose sans gain de rappel ;
     # testé plus haut (50), le rappel s'effondre (48 ruptures manquées sur 59) : on reste à 20.
-    model = SupervisedModel(model_type='lightgbm', random_state=RANDOM_STATE,
-                            min_child_samples=MIN_CHILD_SAMPLES)
-    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
-    mlflow.set_experiment(os.environ.get('MLFLOW_EXPERIMENT_NAME', MLFLOW_EXPERIMENT))
-    with mlflow.start_run():
+    if MODEL_TYPE == 'lightgbm':
+        model = SupervisedModel(model_type='lightgbm', random_state=RANDOM_STATE,
+                                min_child_samples=MIN_CHILD_SAMPLES)
+    else:
+        model = SupervisedModel(model_type=MODEL_TYPE, random_state=RANDOM_STATE)
+    init_mlflow()
+    now = datetime.now()
+    run_name = f"{MODEL_TYPE}_{now:%Y%m%d}_{now:%H%M%S}"
+    with mlflow.start_run(run_name=run_name):
         mlflow.log_params({
             'model_type': model.model_type, **model.model_params,
             'W': W, 'T': T, 'M': M, 'NORM_MAX': NORM_MAX, 'TRAIN_RATIO': TRAIN_RATIO,
@@ -141,8 +180,7 @@ if __name__ == "__main__":
         print(report)
         mlflow.log_metrics({k: float(v) for k, v in model.metrics(X_test, y_test).items()})
         mlflow.log_text(report, 'evaluation_report.txt')
-        mlflow.lightgbm.log_model(model.model, artifact_path='model',
-                                  signature=mlflow.models.infer_signature(X_test, model.predict(X_test)))
-        model_path = model.save()
-        mlflow.set_tag('joblib_path', model_path)
-        print(f"Modèle sauvegardé : {model_path}")
+        if MODEL_TYPE == 'mlp':
+            log_loss_curves(model.model)
+        model.log_to_mlflow(X_test)
+        print(f"Modèle enregistré dans MLflow sous '{REGISTERED_MODEL_NAME}' (run {mlflow.active_run().info.run_id})")
