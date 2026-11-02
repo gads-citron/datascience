@@ -1,0 +1,16 @@
+[sqlfluff]
+templater = placeholder
+
+[sqlfluff:templater:placeholder]
+param_regex = \{(?P<param_name>\w+)(?::[^}]+)?\}
+
+[sqlfluff:templater:placeholder:context]
+fact_table = datawarehouse_stage.fact_payload
+date_column = updated_at
+site_id = 'site'
+pairs = (('a', 'b'))
+ctx_start = '2025-11-12 00:00:00'
+newest_ts = '2026-01-02 00:00:00'
+floor = '2025-07-02 00:00:00'
+start = '2026-01-01 00:00:00'
+end = '2026-01-02 00:00:00'
